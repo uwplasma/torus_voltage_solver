@@ -18,7 +18,7 @@ import argparse
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--vmec-input", type=str, default="examples/input.QA_nfp2")
+    p.add_argument("--vmec-input", type=str, default="input.QA_nfp2")
 
     p.add_argument("--R0", type=float, default=1.0)
     p.add_argument("--a", type=float, default=0.5)
