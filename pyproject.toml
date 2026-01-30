@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "torus-solver"
+version = "0.1.0"
+description = "JAX-differentiable surface-current optimization on a circular torus"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "jax>=0.4",
+  "numpy>=1.22",
+  "optax>=0.2",
+  "jaxopt>=0.8",
+  "equinox>=0.11",
+  "matplotlib>=3.6",
+]
+
+[project.optional-dependencies]
+gui = ["vtk>=9.0"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
