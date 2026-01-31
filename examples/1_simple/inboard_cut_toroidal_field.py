@@ -20,7 +20,7 @@ We compute K on a grid, evaluate B via Biot–Savart at interior points, and com
 toroidal component against the ideal 1/R scaling shape.
 
 Run (from `torus_solver/`):
-  python examples/drive_toroidal_field_inboard_cut.py --trace
+  python examples/1_simple/inboard_cut_toroidal_field.py --trace
 """
 
 from __future__ import annotations
@@ -29,7 +29,10 @@ if __package__ in (None, ""):
     import pathlib
     import sys
 
-    sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
+    root = pathlib.Path(__file__).resolve()
+    while root != root.parent and not (root / "pyproject.toml").exists():
+        root = root.parent
+    sys.path.insert(0, str(root / "src"))
 
 import argparse
 
@@ -40,6 +43,7 @@ import numpy as np
 from torus_solver import biot_savart_surface, ideal_toroidal_field, make_torus_surface
 from torus_solver.fieldline import trace_field_line
 from torus_solver.fields import cylindrical_coords, cylindrical_unit_vectors
+from torus_solver.paraview import fieldlines_to_vtu, point_cloud_to_vtu, torus_surface_to_vtu, write_vtm, write_vtu
 from torus_solver.plotting import ensure_dir, plot_3d_torus, plot_fieldline, plot_surface_map, savefig, set_plot_style
 import torus_solver.plotting as tplot
 
@@ -93,9 +97,10 @@ def main() -> None:
     p.add_argument("--trace", action="store_true", help="Also trace an ideal-toroidal field line and sample B along it")
     p.add_argument("--trace-steps", type=int, default=900)
     p.add_argument("--trace-ds", type=float, default=0.01)
-    p.add_argument("--outdir", type=str, default="figures/drive_toroidal_field_inboard_cut")
+    p.add_argument("--outdir", type=str, default="figures/inboard_cut_toroidal_field")
     p.add_argument("--dpi", type=int, default=300)
     p.add_argument("--no-plots", action="store_true")
+    p.add_argument("--no-paraview", action="store_true", help="Disable ParaView (.vtu/.vtm) outputs")
     p.add_argument("--plot-stride", type=int, default=3)
     args = p.parse_args()
 
@@ -226,6 +231,44 @@ def main() -> None:
         rel_err = float(np.max(np.abs(Bphi_bs_tr - Bphi_an_tr) / (np.abs(Bphi_an_tr) + 1e-30)))
         print("Fieldline sample check (Biot–Savart vs ideal-toroidal along traced line)")
         print(f"  max_abs_err(Bphi)={abs_err:.3e} T  max_rel_err(Bphi)={rel_err:.3e}")
+
+    if not args.no_paraview:
+        outdir_p = ensure_dir(args.outdir)
+        pv_dir = ensure_dir(outdir_p / "paraview")
+
+        surf_pd = {
+            "V": np.asarray(V_vis).reshape(-1),
+            "K": np.asarray(K).reshape(-1, 3),
+            "Ktheta": np.asarray(Ktheta).reshape(-1),
+            "Kphi": np.asarray(Kphi).reshape(-1),
+            "|K|": np.asarray(Kmag).reshape(-1),
+        }
+        surf_vtu = write_vtu(pv_dir / "winding_surface.vtu", torus_surface_to_vtu(surface=surface, point_data=surf_pd))
+
+        eval_pd = {
+            "R": np.asarray(R, dtype=float),
+            "B": np.asarray(B_bs, dtype=float),
+            "Bphi": np.asarray(Bphi_bs, dtype=float),
+            "Bphi_ideal": np.asarray(Bphi_ideal, dtype=float),
+        }
+        eval_vtu = write_vtu(
+            pv_dir / "eval_points.vtu",
+            point_cloud_to_vtu(points=np.asarray(eval_pts, dtype=float), point_data=eval_pd),
+        )
+
+        blocks: dict[str, str] = {
+            "winding_surface": surf_vtu.name,
+            "eval_points": eval_vtu.name,
+        }
+        if pts is not None:
+            traj_vtu = write_vtu(
+                pv_dir / "ideal_fieldline.vtu",
+                fieldlines_to_vtu(traj=np.asarray(pts, dtype=float)[None, :, :]),
+            )
+            blocks["ideal_fieldline"] = traj_vtu.name
+
+        scene = write_vtm(pv_dir / "scene.vtm", blocks)
+        print(f"ParaView scene: {scene}")
 
     if args.no_plots:
         return

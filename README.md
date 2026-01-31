@@ -32,10 +32,10 @@ torus_voltage_solver/
 From the repo root (`torus_voltage_solver/`):
 
 ```bash
-pytest
-python examples/trace_fieldlines_tokamak.py
-python examples/optimize_helical_field.py --n-steps 50
-python examples/scan_vmec_surface_regularization.py --vmec-input examples/input.QA_nfp2
+pytest -q
+python examples/1_simple/tokamak_like_fieldlines.py
+python examples/2_intermediate/optimize_helical_axis_field.py --n-steps 50
+python examples/3_advanced/scan_vmec_surface_regularization.py --vmec-input examples/data/vmec/input.QA_nfp2
 ```
 
 ## Gallery
@@ -256,6 +256,15 @@ publication-style figures to `figures/<example_name>/`. Each script accepts:
 
 - `--outdir ...` to change where figures are written
 - `--no-plots` to disable plotting (faster)
+- `--no-paraview` to disable VTK XML exports for ParaView (`.vtu/.vtm`)
+
+Most non-GUI scripts write a ParaView “scene” file:
+
+- `figures/<example_name>/paraview/scene.vtm`
+
+Open that file in ParaView to explore the configuration in 3D (winding surface, electrodes, field lines, etc).
+
+Note: run outputs under `figures/` and `paraview/` are intentionally `.gitignore`'d and should not be committed.
 
 From the repo root (`torus_voltage_solver/`):
 
@@ -265,11 +274,11 @@ From the repo root (`torus_voltage_solver/`):
   - Run:
     ```bash
     # Electrode-current GUI (click to add/move sources/sinks, slider sets current):
-    python examples/gui_torus_interactive.py
-    python examples/gui_torus_demo_helical.py
+    python examples/2_intermediate/gui_torus_electrodes_interactive.py
+    python examples/2_intermediate/gui_torus_demo_helical.py
 
     # Cut-voltage GUI (slider sets V_cut across a toroidal cut, driving poloidal current):
-    python examples/gui_torus_demo_inboard_cut.py
+    python examples/2_intermediate/gui_torus_demo_inboard_cut.py
     ```
   - Electrode-current GUI key bindings (also shown in the GUI):
     - `a`: add source (next click on surface)
@@ -281,6 +290,7 @@ From the repo root (`torus_voltage_solver/`):
     - `f`: toggle field lines
     - `r`: recompute
     - `i` / `v`: type the selected electrode current
+    - `E`: export ParaView scene to `paraview/gui_torus_electrodes_<timestamp>/scene.vtm`
     - `s`: save screenshot to `figures/gui_screenshots/`
   - Cut-voltage GUI key bindings:
     - `c`: cycle surface scalar (`|K|`, `V`, `s`, `Kθ`, `Kφ`)
@@ -291,46 +301,52 @@ From the repo root (`torus_voltage_solver/`):
     - `r`: recompute
     - `v`: type `V_cut` (cut voltage)
     - `i`: type the selected electrode current (extra sources/sinks on top of the cut)
+    - `E`: export ParaView scene to `paraview/gui_torus_cut_<timestamp>/scene.vtm`
     - `s`: save screenshot to `figures/gui_screenshots/`
 
 - Helical on-axis target optimization:
   ```bash
-  python examples/optimize_helical_field.py --n-steps 200
+  python examples/2_intermediate/optimize_helical_axis_field.py --n-steps 200
   ```
 
 - Electrode-driven “inboard cut” that produces a toroidal ~1/R field (non-GUI):
   ```bash
-  python examples/drive_toroidal_field_inboard_cut.py --trace
+  python examples/1_simple/inboard_cut_toroidal_field.py --trace
   ```
 
 - Rotating ellipse around a bumpy axis (toy near-axis target):
   ```bash
-  python examples/optimize_bumpy_axis_rotating_ellipse.py --R0 3.0 --a 1.0 --n-steps 120
+  python examples/3_advanced/optimize_bumpy_axis_rotating_ellipse.py --R0 3.0 --a 1.0 --n-steps 120
   ```
 
 - VMEC-surface normal-field minimization (prototype REGCOIL-like objective):
   ```bash
-  python examples/optimize_vmec_surface_Bn.py --vmec-input examples/input.QA_nfp2
+  python examples/3_advanced/optimize_vmec_surface_Bn.py --model current-potential --vmec-input examples/data/vmec/input.QA_nfp2
   ```
 
 - REGCOIL-style regularization scan (tradeoff / “L-curve”):
   ```bash
-  python examples/scan_vmec_surface_regularization.py --vmec-input examples/input.QA_nfp2
+  python examples/3_advanced/scan_vmec_surface_regularization.py --vmec-input examples/data/vmec/input.QA_nfp2
   ```
 
 - VMEC-surface normal-field minimization GUI (interactive 3D, with optimization hotkeys):
   ```bash
-  python examples/gui_optimize_vmec_surface_Bn.py --vmec-input examples/input.QA_nfp2
+  python examples/3_advanced/gui_optimize_vmec_surface_Bn.py --vmec-input examples/data/vmec/input.QA_nfp2
   ```
 
 - Trace field lines in an analytic tokamak-like field:
   ```bash
-  python examples/trace_fieldlines_tokamak.py
+  python examples/1_simple/tokamak_like_fieldlines.py
   ```
 
 - Trace field lines in an analytic toroidal field and validate Biot–Savart along the trace:
   ```bash
-  python examples/trace_fieldlines_shell_toroidal_field.py
+  python examples/1_simple/shell_toroidal_fieldlines.py
+  ```
+
+- JAX vs NumPy speed demo for Biot–Savart:
+  ```bash
+  python examples/1_simple/jax_vs_numpy_biot_savart_speed.py --n-eval 512 --repeat 20
   ```
 
 ## Benchmarks

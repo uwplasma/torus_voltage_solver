@@ -2,7 +2,7 @@
 """Example: trace field lines in an analytic tokamak-like 1/R field.
 
 Run:
-  - `python examples/trace_fieldlines_tokamak.py`
+  - `python examples/1_simple/tokamak_like_fieldlines.py`
 """
 
 from __future__ import annotations
@@ -11,7 +11,10 @@ if __package__ in (None, ""):
     import pathlib
     import sys
 
-    sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
+    root = pathlib.Path(__file__).resolve()
+    while root != root.parent and not (root / "pyproject.toml").exists():
+        root = root.parent
+    sys.path.insert(0, str(root / "src"))
 
 import argparse
 
@@ -19,8 +22,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from torus_solver import make_torus_surface
 from torus_solver.fieldline import trace_field_line
 from torus_solver.fields import toroidal_poloidal_coords, tokamak_like_field
+from torus_solver.paraview import fieldlines_to_vtu, torus_surface_to_vtu, write_vtm, write_vtu
 from torus_solver.plotting import ensure_dir, plot_fieldline, savefig, set_plot_style
 import torus_solver.plotting as tplot
 
@@ -35,9 +40,10 @@ def main() -> None:
     p.add_argument("--Bpol0", type=float, default=0.1, help="Poloidal field at R=R0 (T)")
     p.add_argument("--step", type=float, default=0.02)
     p.add_argument("--n", type=int, default=4000)
-    p.add_argument("--outdir", type=str, default="figures/trace_fieldlines_tokamak")
+    p.add_argument("--outdir", type=str, default="figures/tokamak_like_fieldlines")
     p.add_argument("--dpi", type=int, default=300)
     p.add_argument("--no-plots", action="store_true")
+    p.add_argument("--no-paraview", action="store_true", help="Disable ParaView (.vtu/.vtm) outputs")
     args = p.parse_args()
 
     if not args.no_plots:
@@ -79,6 +85,37 @@ def main() -> None:
     theta_u = jnp.unwrap(theta)
     slope = (theta_u[-1] - theta_u[0]) / (phi_u[-1] - phi_u[0] + 1e-30)
     print(f"  approx dθ/dφ ≈ {float(slope):.4f}")
+
+    if not args.no_paraview:
+        outdir_p = ensure_dir(args.outdir)
+        pv_dir = ensure_dir(outdir_p / "paraview")
+
+        pts_np = np.asarray(pts, dtype=float)
+        B_np = np.asarray(tokamak_like_field(pts, B_tor0=args.Btor0, B_pol0=args.Bpol0, R0=args.R0))
+        Bmag = np.linalg.norm(B_np, axis=-1)
+
+        line_vtu = write_vtu(
+            pv_dir / "fieldline.vtu",
+            fieldlines_to_vtu(
+                traj=pts_np[None, :, :],
+                point_data={
+                    "B": B_np,
+                    "|B|": Bmag,
+                    "phi_unwrapped": np.asarray(phi_u, dtype=float),
+                    "theta_unwrapped": np.asarray(theta_u, dtype=float),
+                    "rho": np.asarray(rho, dtype=float),
+                },
+            ),
+        )
+
+        # A convenient torus surface for context: choose a minor radius that encloses the traced line.
+        rho_max = float(jnp.max(rho))
+        a_vis = float(max(1.2 * rho_max, 1e-3))
+        surf = make_torus_surface(R0=float(args.R0), a=a_vis, n_theta=48, n_phi=48)
+        surf_vtu = write_vtu(pv_dir / "torus_context.vtu", torus_surface_to_vtu(surface=surf))
+
+        scene = write_vtm(pv_dir / "scene.vtm", {"torus_context": surf_vtu.name, "fieldline": line_vtu.name})
+        print(f"ParaView scene: {scene}")
 
     if not args.no_plots:
         pts_np = np.asarray(pts)

@@ -34,6 +34,41 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 
+def fix_matplotlib_3d(ax) -> None:
+    """Equal aspect ratio for Matplotlib 3D axes.
+
+    Matplotlib's 3D projection does not guarantee equal scaling by default.
+    This helper enforces equal data ranges in x/y/z so that geometric objects
+    (e.g. circles) look undistorted.
+
+    The implementation follows a common pattern:
+
+    - Compute midpoints and ranges of (xlim, ylim, zlim)
+    - Set symmetric limits with the same half-range on all axes
+    """
+    x_limits = ax.get_xlim3d()
+    y_limits = ax.get_ylim3d()
+    z_limits = ax.get_zlim3d()
+
+    x_range = abs(x_limits[1] - x_limits[0])
+    x_mid = 0.5 * (x_limits[0] + x_limits[1])
+    y_range = abs(y_limits[1] - y_limits[0])
+    y_mid = 0.5 * (y_limits[0] + y_limits[1])
+    z_range = abs(z_limits[1] - z_limits[0])
+    z_mid = 0.5 * (z_limits[0] + z_limits[1])
+
+    R = 0.5 * max(x_range, y_range, z_range, 1e-12)
+    ax.set_xlim3d([x_mid - R, x_mid + R])
+    ax.set_ylim3d([y_mid - R, y_mid + R])
+    ax.set_zlim3d([z_mid - R, z_mid + R])
+
+    # Newer Matplotlib versions support a true "box aspect".
+    try:
+        ax.set_box_aspect((1.0, 1.0, 1.0))
+    except Exception:
+        pass
+
+
 def set_plot_style(*, small: bool = False) -> None:
     """Set consistent, publication-style Matplotlib defaults."""
     base = 11.0 if not small else 9.5
@@ -148,7 +183,7 @@ def plot_surface_map(
     im = ax.imshow(
         data,
         origin="lower",
-        aspect="auto",
+        aspect="equal",
         extent=(x0, x1, y0, y1),
         cmap=cmap,
         vmin=vmin,
@@ -249,31 +284,7 @@ def plot_3d_torus(
     ax.set_zlabel("z [m]")
     ax.legend(loc="upper left")
 
-    # Nice equal-aspect 3D scaling (available in modern Matplotlib).
-    try:
-        xs = [X.ravel(), Y.ravel(), Z.ravel()]
-        if curve_xyz is not None:
-            c = _as_numpy(curve_xyz)
-            xs[0] = np.concatenate([xs[0], c[:, 0]])
-            xs[1] = np.concatenate([xs[1], c[:, 1]])
-            xs[2] = np.concatenate([xs[2], c[:, 2]])
-        if eval_xyz is not None:
-            p = _as_numpy(eval_xyz)
-            xs[0] = np.concatenate([xs[0], p[:, 0]])
-            xs[1] = np.concatenate([xs[1], p[:, 1]])
-            xs[2] = np.concatenate([xs[2], p[:, 2]])
-        if electrodes_xyz is not None:
-            e = _as_numpy(electrodes_xyz)
-            xs[0] = np.concatenate([xs[0], e[:, 0]])
-            xs[1] = np.concatenate([xs[1], e[:, 1]])
-            xs[2] = np.concatenate([xs[2], e[:, 2]])
-
-        rx = float(np.ptp(xs[0]))
-        ry = float(np.ptp(xs[1]))
-        rz = float(np.ptp(xs[2]))
-        ax.set_box_aspect((rx, ry, rz if rz > 0 else 1.0))
-    except Exception:
-        pass
+    fix_matplotlib_3d(ax)
 
     ax.view_init(elev=25, azim=35)
     savefig(fig, path)
@@ -301,6 +312,7 @@ def plot_fieldline(
     ax.set_zlabel("z [m]")
     ax.legend(loc="best")
     ax.view_init(elev=25, azim=35)
+    fix_matplotlib_3d(ax)
     savefig(fig, path3d)
 
     fig, ax = plt.subplots(constrained_layout=True)
@@ -350,13 +362,7 @@ def plot_fieldlines_3d(
     ax.set_ylabel("y [m]")
     ax.set_zlabel("z [m]")
 
-    try:
-        rx = float(np.ptp(X))
-        ry = float(np.ptp(Y))
-        rz = float(np.ptp(Z))
-        ax.set_box_aspect((rx, ry, rz if rz > 0 else 1.0))
-    except Exception:
-        pass
+    fix_matplotlib_3d(ax)
 
     ax.view_init(elev=25, azim=35)
     savefig(fig, path)

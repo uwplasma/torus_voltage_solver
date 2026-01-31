@@ -24,7 +24,7 @@ and aim for `max|Bn/B| < 5e-3` (0.5%).
 
 ## Current-potential model (REGCOIL-like)
 
-`examples/optimize_vmec_surface_Bn.py --model current-potential` solves:
+`examples/3_advanced/optimize_vmec_surface_Bn.py --model current-potential` solves:
 
 - parameterization: $\Phi_{\mathrm{sv}}$ as a Fourier series in $(\theta,\phi)$
 - net currents: $(I_\mathrm{pol}, I_\mathrm{tor})$
@@ -70,7 +70,7 @@ In this repository:
 
 - `torus_solver.optimize.optimize_sources(...)` uses Adam (Optax).
 - `torus_solver.optimize.optimize_sources_lbfgs(...)` uses L-BFGS (JAXopt), which can converge in fewer steps for small/medium problems.
-- `examples/optimize_helical_field.py --optimizer lbfgs` demonstrates the L-BFGS path.
+- `examples/2_intermediate/optimize_helical_axis_field.py --optimizer lbfgs` demonstrates the L-BFGS path.
 
 ## Practical tuning knobs
 
@@ -92,8 +92,9 @@ curve (often called an “L-curve”):
 - smaller regularization → smaller `Bn/B`, but larger `|K|`
 - larger regularization → smaller `|K|`, but worse `Bn/B`
 
-`examples/scan_vmec_surface_regularization.py` performs this scan in a way that is friendly to research:
-
+`examples/3_advanced/scan_vmec_surface_regularization.py` performs this scan in a way that is friendly to research:
 - runs a series of optimizations for a geometric sequence of `reg_K`
 - uses continuation / warm-starting (each run initializes from the previous result)
 - produces a log–log tradeoff plot of `max|Bn/B|` and `rms(Bn/B)` versus `K_rms`
+
+The script accepts `--vmec-input examples/data/vmec/input.QA_nfp2` (from the repo root).

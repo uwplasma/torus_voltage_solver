@@ -11,8 +11,8 @@ winding surface while sweeping the regularization weight on ⟨|K|^2⟩, produci
 The continuation strategy (warm-starting each solve from the previous solution)
 is commonly used in coil/current-potential design workflows.
 
-Run (from `torus_solver/`):
-  python examples/scan_vmec_surface_regularization.py --vmec-input examples/input.QA_nfp2
+Run:
+  python examples/3_advanced/scan_vmec_surface_regularization.py --vmec-input examples/data/vmec/input.QA_nfp2
 """
 
 from __future__ import annotations
@@ -21,7 +21,10 @@ if __package__ in (None, ""):
     import pathlib
     import sys
 
-    sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
+    root = pathlib.Path(__file__).resolve()
+    while root != root.parent and not (root / "pyproject.toml").exists():
+        root = root.parent
+    sys.path.insert(0, str(root / "src"))
 
 import argparse
 import time
@@ -37,6 +40,7 @@ from torus_solver import make_torus_surface
 from torus_solver.biot_savart import MU0, biot_savart_surface
 from torus_solver.current_potential import surface_current_from_current_potential_with_net_currents
 from torus_solver.metrics import bn_over_B_metrics, weighted_p_norm
+from torus_solver.paraview import point_cloud_to_vtu, torus_surface_to_vtu, write_vtm, write_vtu
 from torus_solver.plotting import ensure_dir, plot_surface_map, savefig, set_plot_style
 from torus_solver.targets import vmec_target_surface
 from torus_solver.vmec import read_vmec_boundary
@@ -61,17 +65,34 @@ def _resolve_vmec_input(vmec_input: str) -> Path:
     p = Path(vmec_input)
     if p.exists():
         return p
-    cand = Path(__file__).resolve().parent / vmec_input
-    if cand.exists():
-        return cand
-    raise FileNotFoundError(f"VMEC input not found: {vmec_input} (tried {p.resolve()} and {cand})")
+
+    script_dir = Path(__file__).resolve().parent
+    repo_root = script_dir
+    while repo_root != repo_root.parent and not (repo_root / "pyproject.toml").exists():
+        repo_root = repo_root.parent
+
+    candidates = [
+        script_dir / vmec_input,
+        repo_root / vmec_input,
+        repo_root / "examples" / vmec_input,
+        repo_root / "examples" / "data" / "vmec" / Path(vmec_input).name,
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return cand
+    raise FileNotFoundError(
+        "VMEC input not found.\n"
+        f"  got: {vmec_input}\n"
+        f"  tried: {p.resolve()}\n"
+        + "".join(f"  tried: {c}\n" for c in candidates)
+    )
 
 
 def main() -> None:
     jax.config.update("jax_enable_x64", True)
 
     p = argparse.ArgumentParser()
-    p.add_argument("--vmec-input", type=str, default="input.QA_nfp2")
+    p.add_argument("--vmec-input", type=str, default="examples/data/vmec/input.QA_nfp2")
 
     p.add_argument("--R0", type=float, default=1.0)
     p.add_argument("--a", type=float, default=0.3)
@@ -108,15 +129,19 @@ def main() -> None:
     p.add_argument("--outdir", type=str, default="figures/scan_vmec_surface_regularization")
     p.add_argument("--dpi", type=int, default=300)
     p.add_argument("--no-plots", action="store_true")
+    p.add_argument("--no-paraview", action="store_true", help="Disable ParaView (.vtu/.vtm) outputs")
     args = p.parse_args()
 
-    if not args.no_plots:
-        set_plot_style()
+    outdir = None
+    if (not args.no_plots) or (not args.no_paraview):
         outdir = ensure_dir(args.outdir)
-        ensure_dir(outdir / "maps")
-        print(f"Saving figures to: {outdir}")
-    else:
-        outdir = None
+        if not args.no_plots:
+            set_plot_style()
+            ensure_dir(outdir / "maps")
+            print(f"Saving figures to: {outdir}")
+        if not args.no_paraview:
+            ensure_dir(outdir / "paraview")
+            print(f"Saving ParaView outputs to: {outdir / 'paraview'}")
 
     vmec_path = _resolve_vmec_input(args.vmec_input)
     print("Loading VMEC boundary:", str(vmec_path))
@@ -300,6 +325,49 @@ def main() -> None:
         np.savetxt(out_csv, data, delimiter=",", header=header, comments="")
         print("Saved scan table:", out_csv)
 
+    # Best (smallest reg_K) solution in the scan.
+    best_params = last
+    Phi_sv = Phi_from_params(best_params)
+    K = surface_current_from_current_potential_with_net_currents(
+        surface,
+        Phi_sv,
+        net_poloidal_current_A=net_poloidal_current_A,
+        net_toroidal_current_A=net_toroidal_current_A,
+    )
+    B = biot_savart_surface(surface, K, eval_points, eps=float(args.biot_savart_eps))
+    ratio, rms, max_abs = bn_over_B_metrics(B, normals, weights)
+    ratio_grid = np.asarray(ratio.reshape((int(args.surf_n_theta), int(args.surf_n_phi))))
+    Kmag = np.asarray(jnp.linalg.norm(K, axis=-1))
+
+    if not args.no_paraview:
+        assert outdir is not None
+        pv_dir = ensure_dir(Path(outdir) / "paraview")
+
+        surf = write_vtu(
+            pv_dir / "winding_surface_best.vtu",
+            torus_surface_to_vtu(
+                surface=surface,
+                point_data={
+                    "Phi": np.asarray(Phi_sv).reshape(-1),
+                    "K": np.asarray(K).reshape(-1, 3),
+                    "|K|": np.asarray(jnp.linalg.norm(K, axis=-1)).reshape(-1),
+                },
+            ),
+        )
+        tgt = write_vtu(
+            pv_dir / "target_points.vtu",
+            point_cloud_to_vtu(
+                points=np.asarray(eval_points, dtype=float),
+                point_data={
+                    "Bn_over_B": np.asarray(ratio, dtype=float),
+                    "n_hat": np.asarray(normals, dtype=float),
+                    "weight": np.asarray(weights, dtype=float),
+                },
+            ),
+        )
+        scene = write_vtm(pv_dir / "scene.vtm", {"winding_surface_best": surf.name, "target_points": tgt.name})
+        print(f"ParaView scene: {scene}")
+
     if args.no_plots:
         return
 
@@ -323,19 +391,6 @@ def main() -> None:
     ax.legend(loc="best")
     savefig(fig, Path(outdir) / "l_curve.png", dpi=int(args.dpi))
 
-    # Also save maps for the best (smallest reg_K) solution in the scan.
-    best_params = last
-    Phi_sv = Phi_from_params(best_params)
-    K = surface_current_from_current_potential_with_net_currents(
-        surface,
-        Phi_sv,
-        net_poloidal_current_A=net_poloidal_current_A,
-        net_toroidal_current_A=net_toroidal_current_A,
-    )
-    B = biot_savart_surface(surface, K, eval_points, eps=float(args.biot_savart_eps))
-    ratio, rms, max_abs = bn_over_B_metrics(B, normals, weights)
-    ratio_grid = np.asarray(ratio.reshape((int(args.surf_n_theta), int(args.surf_n_phi))))
-
     plot_surface_map(
         phi=np.asarray(target.phi),
         theta=np.asarray(target.theta),
@@ -348,7 +403,6 @@ def main() -> None:
         vmax=float(max_abs),
     )
 
-    Kmag = np.asarray(jnp.linalg.norm(K, axis=-1))
     plot_surface_map(
         phi=np.asarray(surface.phi),
         theta=np.asarray(surface.theta),

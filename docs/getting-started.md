@@ -35,10 +35,15 @@ From the repo root (`torus_voltage_solver/`):
 
 ```bash
 pytest -q
-python examples/trace_fieldlines_tokamak.py
-python examples/optimize_vmec_surface_Bn.py --model current-potential --vmec-input examples/input.QA_nfp2
-python examples/scan_vmec_surface_regularization.py --vmec-input examples/input.QA_nfp2
+python examples/1_simple/tokamak_like_fieldlines.py
+python examples/3_advanced/optimize_vmec_surface_Bn.py --model current-potential --vmec-input examples/data/vmec/input.QA_nfp2
+python examples/3_advanced/scan_vmec_surface_regularization.py --vmec-input examples/data/vmec/input.QA_nfp2
 ```
+
+:::{tip}
+Most scripts also write ParaView datasets into `figures/<example>/paraview/scene.vtm`.
+Open that file in ParaView to explore the 3D configuration interactively.
+:::
 
 ## Quickstart (minimal Python)
 

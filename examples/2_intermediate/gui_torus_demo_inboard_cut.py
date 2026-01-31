@@ -9,7 +9,7 @@ You can also add *extra* sources/sinks (electrodes) on top of the cut-driven cur
 using the same hotkeys as the electrode GUI.
 
 Run (from `torus_solver/`):
-  python examples/gui_torus_demo_inboard_cut.py
+  python examples/2_intermediate/gui_torus_demo_inboard_cut.py
 """
 
 from __future__ import annotations
@@ -18,7 +18,10 @@ if __package__ in (None, ""):
     import pathlib
     import sys
 
-    sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
+    root = pathlib.Path(__file__).resolve()
+    while root != root.parent and not (root / "pyproject.toml").exists():
+        root = root.parent
+    sys.path.insert(0, str(root / "src"))
 
 import argparse
 

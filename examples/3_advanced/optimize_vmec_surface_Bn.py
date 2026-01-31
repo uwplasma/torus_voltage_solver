@@ -18,8 +18,8 @@ Important notes:
     ingredient for a magnetic surface.
   - The VMEC boundary is shifted/scaled (if needed) so it fits inside the circular torus.
 
-Run (from `torus_solver/`):
-  python examples/optimize_vmec_surface_Bn.py --vmec-input examples/input.QA_nfp2
+Run:
+  python examples/3_advanced/optimize_vmec_surface_Bn.py --vmec-input examples/data/vmec/input.QA_nfp2
 """
 
 from __future__ import annotations
@@ -28,7 +28,10 @@ if __package__ in (None, ""):
     import pathlib
     import sys
 
-    sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
+    root = pathlib.Path(__file__).resolve()
+    while root != root.parent and not (root / "pyproject.toml").exists():
+        root = root.parent
+    sys.path.insert(0, str(root / "src"))
 
 import argparse
 import time
@@ -49,6 +52,7 @@ from torus_solver.fieldline import trace_field_lines_batch
 from torus_solver.fields import ideal_toroidal_field
 from torus_solver.metrics import bn_over_B_metrics, weighted_p_norm
 from torus_solver.optimize import SourceParams, enforce_net_zero, surface_solution
+from torus_solver.paraview import fieldlines_to_vtu, point_cloud_to_vtu, torus_surface_to_vtu, write_vtm, write_vtu
 from torus_solver.plotting import (
     ensure_dir,
     plot_3d_torus,
@@ -89,19 +93,28 @@ def _resolve_vmec_input(vmec_input: str) -> Path:
     if p.exists():
         return p
 
-    # If the user passed e.g. "input.QA_nfp2" while running from `torus_solver/`,
-    # the file lives next to this script in `examples/`.
     script_dir = Path(__file__).resolve().parent
-    cand = script_dir / vmec_input
-    if cand.exists():
-        return cand
+
+    repo_root = script_dir
+    while repo_root != repo_root.parent and not (repo_root / "pyproject.toml").exists():
+        repo_root = repo_root.parent
+
+    candidates = [
+        script_dir / vmec_input,
+        repo_root / vmec_input,  # allow paths relative to the repo root
+        repo_root / "examples" / vmec_input,
+        repo_root / "examples" / "data" / "vmec" / Path(vmec_input).name,
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return cand
 
     msg = (
         "VMEC input file not found.\n"
         f"  got: {vmec_input}\n"
         f"  tried: {p.resolve()}\n"
-        f"  tried: {cand}\n"
-        "Tip: run with `--vmec-input examples/input.QA_nfp2` (from `torus_solver/`)."
+        + "".join(f"  tried: {c}\n" for c in candidates)
+        + "Tip: run with `--vmec-input examples/data/vmec/input.QA_nfp2` (from the repo root)."
     )
     raise FileNotFoundError(msg)
 
@@ -196,7 +209,7 @@ def main() -> None:
         choices=["current-potential", "electrodes"],
         help="Optimization model for currents on the circular torus winding surface.",
     )
-    p.add_argument("--vmec-input", type=str, default="input.QA_nfp2")
+    p.add_argument("--vmec-input", type=str, default="examples/data/vmec/input.QA_nfp2")
 
     # Winding surface (circular torus) geometry.
     p.add_argument("--R0", type=float, default=1.0, help="Torus major radius [m]")
@@ -300,18 +313,24 @@ def main() -> None:
     p.add_argument("--outdir", type=str, default="figures/optimize_vmec_surface_Bn")
     p.add_argument("--dpi", type=int, default=300)
     p.add_argument("--no-plots", action="store_true")
+    p.add_argument("--no-paraview", action="store_true", help="Disable ParaView (.vtu/.vtm) outputs")
     p.add_argument("--plot-stride", type=int, default=3)
     args = p.parse_args()
 
-    if not args.no_plots:
-        set_plot_style()
+    outdir = None
+    if (not args.no_plots) or (not args.no_paraview):
         outdir = ensure_dir(args.outdir)
-        ensure_dir(outdir / "target")
-        ensure_dir(outdir / "surface")
-        ensure_dir(outdir / "optim")
-        ensure_dir(outdir / "geometry")
-        ensure_dir(outdir / "fieldlines")
-        print(f"Saving figures to: {outdir}")
+        if not args.no_plots:
+            set_plot_style()
+            ensure_dir(outdir / "target")
+            ensure_dir(outdir / "surface")
+            ensure_dir(outdir / "optim")
+            ensure_dir(outdir / "geometry")
+            ensure_dir(outdir / "fieldlines")
+            print(f"Saving figures to: {outdir}")
+        if not args.no_paraview:
+            ensure_dir(outdir / "paraview")
+            print(f"Saving ParaView outputs to: {outdir / 'paraview'}")
 
     vmec_path = _resolve_vmec_input(args.vmec_input)
     print("Loading VMEC boundary:", str(vmec_path))
@@ -689,6 +708,61 @@ def main() -> None:
             worst = np.argsort(end_per_line)[-min(5, end_per_line.size) :][::-1]
             print("  drift end per-line (worst):", ", ".join(f"{i}:{end_per_line[i]:.3e}m" for i in worst))
 
+        if not args.no_paraview:
+            assert outdir is not None
+            pv_dir = ensure_dir(outdir / "paraview")
+
+            Kmag0 = np.asarray(jnp.linalg.norm(K0, axis=-1)).reshape(-1)
+            Kmag1 = np.asarray(jnp.linalg.norm(K1, axis=-1)).reshape(-1)
+            surf_init = write_vtu(
+                pv_dir / "winding_surface_init.vtu",
+                torus_surface_to_vtu(
+                    surface=surface,
+                    point_data={
+                        "Phi": np.asarray(Phi0_sv).reshape(-1),
+                        "K": np.asarray(K0).reshape(-1, 3),
+                        "|K|": Kmag0,
+                    },
+                ),
+            )
+            surf_final = write_vtu(
+                pv_dir / "winding_surface_final.vtu",
+                torus_surface_to_vtu(
+                    surface=surface,
+                    point_data={
+                        "Phi": np.asarray(Phi1_sv).reshape(-1),
+                        "K": np.asarray(K1).reshape(-1, 3),
+                        "|K|": Kmag1,
+                    },
+                ),
+            )
+
+            tgt = write_vtu(
+                pv_dir / "target_points.vtu",
+                point_cloud_to_vtu(
+                    points=np.asarray(eval_points, dtype=float),
+                    point_data={
+                        "Bn_over_B_init": np.asarray(ratio0, dtype=float),
+                        "Bn_over_B_final": np.asarray(ratio1, dtype=float),
+                        "n_hat": np.asarray(normals, dtype=float),
+                        "weight": np.asarray(weights, dtype=float),
+                    },
+                ),
+            )
+
+            blocks: dict[str, str] = {
+                "winding_surface_init": surf_init.name,
+                "winding_surface_final": surf_final.name,
+                "target_points": tgt.name,
+            }
+            if traj_np is not None:
+                traj_pv = np.transpose(traj_np, (1, 0, 2))
+                fl = write_vtu(pv_dir / "fieldlines_final.vtu", fieldlines_to_vtu(traj=traj_pv))
+                blocks["fieldlines_final"] = fl.name
+
+            scene = write_vtm(pv_dir / "scene.vtm", blocks)
+            print(f"ParaView scene: {scene}")
+
         if args.no_plots:
             return
 
@@ -916,6 +990,120 @@ def main() -> None:
     print(f"  rms(Bn/B) final = {float(rms1):.3e}")
     print(f"  max|Bn/B| final = {float(max1):.3e}")
 
+    traj_np = None
+    if (not args.no_fieldlines) and ((not args.no_plots) or (not args.no_paraview)):
+        print("Tracing field lines for final total field (background + Biot–Savart)...")
+        theta_seed = jnp.linspace(0.0, 2 * jnp.pi, int(args.n_fieldlines), endpoint=False)
+        rho = 0.5 * surface.a
+        R_seed = surface.R0 + rho * jnp.cos(theta_seed)
+        Z_seed = rho * jnp.sin(theta_seed)
+        seeds = jnp.stack([R_seed, jnp.zeros_like(R_seed), Z_seed], axis=-1)
+
+        def B_fn(xyz_pts: jnp.ndarray) -> jnp.ndarray:
+            return ideal_toroidal_field(xyz_pts, B0=args.B0, R0=args.R0) + biot_savart_surface(
+                surface, K1, xyz_pts, eps=float(args.biot_savart_eps)
+            )
+
+        traj = jax.jit(
+            lambda x0: trace_field_lines_batch(
+                B_fn,
+                x0,
+                step_size=float(args.fieldline_ds),
+                n_steps=int(args.fieldline_steps),
+                normalize=True,
+            )
+        )(seeds)
+        traj.block_until_ready()
+        traj_np = np.asarray(traj)
+
+    if not args.no_paraview:
+        assert outdir is not None
+        pv_dir = ensure_dir(outdir / "paraview")
+
+        Kmag0 = np.asarray(jnp.linalg.norm(K0, axis=-1)).reshape(-1)
+        Kmag1 = np.asarray(jnp.linalg.norm(K1, axis=-1)).reshape(-1)
+        surf_init = write_vtu(
+            pv_dir / "winding_surface_init.vtu",
+            torus_surface_to_vtu(
+                surface=surface,
+                point_data={
+                    "V": np.asarray(V0).reshape(-1),
+                    "s": np.asarray(s0).reshape(-1),
+                    "K": np.asarray(K0).reshape(-1, 3),
+                    "|K|": Kmag0,
+                },
+            ),
+        )
+        surf_final = write_vtu(
+            pv_dir / "winding_surface_final.vtu",
+            torus_surface_to_vtu(
+                surface=surface,
+                point_data={
+                    "V": np.asarray(V1).reshape(-1),
+                    "s": np.asarray(s1).reshape(-1),
+                    "K": np.asarray(K1).reshape(-1, 3),
+                    "|K|": Kmag1,
+                },
+            ),
+        )
+
+        def torus_xyz(theta, phi):
+            R = args.R0 + args.a * np.cos(theta)
+            return np.stack([R * np.cos(phi), R * np.sin(phi), args.a * np.sin(theta)], axis=-1)
+
+        el0_xyz = torus_xyz(np.asarray(init.theta_src), np.asarray(init.phi_src))
+        el1_xyz = torus_xyz(np.asarray(params.theta_src), np.asarray(params.phi_src))
+        el_init = write_vtu(
+            pv_dir / "electrodes_init.vtu",
+            point_cloud_to_vtu(
+                points=el0_xyz,
+                point_data={
+                    "I_A": np.asarray(currents0, dtype=float),
+                    "I_raw": np.asarray(init.currents_raw, dtype=float),
+                    "sign_I": np.sign(np.asarray(currents0, dtype=float)),
+                },
+            ),
+        )
+        el_final = write_vtu(
+            pv_dir / "electrodes_final.vtu",
+            point_cloud_to_vtu(
+                points=el1_xyz,
+                point_data={
+                    "I_A": np.asarray(currents1, dtype=float),
+                    "I_raw": np.asarray(params.currents_raw, dtype=float),
+                    "sign_I": np.sign(np.asarray(currents1, dtype=float)),
+                },
+            ),
+        )
+
+        tgt = write_vtu(
+            pv_dir / "target_points.vtu",
+            point_cloud_to_vtu(
+                points=np.asarray(eval_points, dtype=float),
+                point_data={
+                    "Bn_over_B_init": np.asarray(ratio0, dtype=float),
+                    "Bn_over_B_final": np.asarray(ratio1, dtype=float),
+                    "n_hat": np.asarray(normals, dtype=float),
+                    "weight": np.asarray(weights, dtype=float),
+                },
+            ),
+        )
+
+        blocks: dict[str, str] = {
+            "winding_surface_init": surf_init.name,
+            "winding_surface_final": surf_final.name,
+            "electrodes_init": el_init.name,
+            "electrodes_final": el_final.name,
+            "target_points": tgt.name,
+        }
+        if traj_np is not None:
+            traj_pv = np.transpose(traj_np, (1, 0, 2))
+            fl = write_vtu(pv_dir / "fieldlines_final.vtu", fieldlines_to_vtu(traj=traj_pv))
+            blocks["fieldlines_final"] = fl.name
+
+        scene = write_vtm(pv_dir / "scene.vtm", blocks)
+        print(f"ParaView scene: {scene}")
+
     if args.no_plots:
         return
 
@@ -991,33 +1179,10 @@ def main() -> None:
     )
 
     # Field lines of the *total* field.
-    if not args.no_fieldlines:
-        print("Tracing field lines for final total field (background + Biot–Savart)...")
-        theta_seed = jnp.linspace(0.0, 2 * jnp.pi, int(args.n_fieldlines), endpoint=False)
-        rho = 0.5 * surface.a
-        R_seed = surface.R0 + rho * jnp.cos(theta_seed)
-        Z_seed = rho * jnp.sin(theta_seed)
-        seeds = jnp.stack([R_seed, jnp.zeros_like(R_seed), Z_seed], axis=-1)
-
-        def B_fn(xyz_pts: jnp.ndarray) -> jnp.ndarray:
-            return ideal_toroidal_field(xyz_pts, B0=args.B0, R0=args.R0) + biot_savart_surface(
-                surface, K1, xyz_pts, eps=float(args.biot_savart_eps)
-            )
-
-        traj = jax.jit(
-            lambda x0: trace_field_lines_batch(
-                B_fn,
-                x0,
-                step_size=float(args.fieldline_ds),
-                n_steps=int(args.fieldline_steps),
-                normalize=True,
-            )
-        )(seeds)
-        traj.block_until_ready()
-
+    if traj_np is not None:
         plot_fieldlines_3d(
             torus_xyz=np.asarray(surface.r),
-            traj=np.asarray(traj),
+            traj=traj_np,
             stride=args.plot_stride,
             line_stride=1,
             title="Final total-field lines (background toroidal + optimized shell currents)",

@@ -69,7 +69,7 @@ In the code:
 
 REGCOIL solves a regularized least-squares problem for $\Phi$ on a coil surface, typically minimizing some norm of $B_n$ on a plasma boundary (plus regularization in $|K|^2$ or related measures). In this repository:
 
-- `examples/optimize_vmec_surface_Bn.py` implements an analogous idea on a **circular torus coil surface** using:
+- `examples/3_advanced/optimize_vmec_surface_Bn.py` implements an analogous idea on a **circular torus coil surface** using:
   - Fourier coefficients for $\Phi_{\mathrm{sv}}$
   - an objective based on **normalized** $B_n/|B|$
   - L-BFGS (from `jaxopt`) and JAX autodiff

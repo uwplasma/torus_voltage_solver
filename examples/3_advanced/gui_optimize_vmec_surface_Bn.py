@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Interactive GUI: optimize electrode sources/sinks to reduce (B·n)/|B| on a VMEC surface.
 
-Run (from `torus_solver/`):
-  python examples/gui_optimize_vmec_surface_Bn.py --vmec-input examples/input.QA_nfp2
+Run:
+  python examples/3_advanced/gui_optimize_vmec_surface_Bn.py --vmec-input examples/data/vmec/input.QA_nfp2
 """
 
 from __future__ import annotations
@@ -11,14 +11,17 @@ if __package__ in (None, ""):
     import pathlib
     import sys
 
-    sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
+    root = pathlib.Path(__file__).resolve()
+    while root != root.parent and not (root / "pyproject.toml").exists():
+        root = root.parent
+    sys.path.insert(0, str(root / "src"))
 
 import argparse
 
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--vmec-input", type=str, default="input.QA_nfp2")
+    p.add_argument("--vmec-input", type=str, default="examples/data/vmec/input.QA_nfp2")
 
     p.add_argument("--R0", type=float, default=1.0)
     p.add_argument("--a", type=float, default=0.3)

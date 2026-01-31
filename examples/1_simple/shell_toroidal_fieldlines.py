@@ -11,7 +11,7 @@ We trace field lines using the analytic ideal field (fast), then validate by
 sampling the Biot–Savart field from the surface current sheet along the traced line.
 
 Run:
-  - `python examples/trace_fieldlines_shell_toroidal_field.py`
+  - `python examples/1_simple/shell_toroidal_fieldlines.py`
 """
 
 from __future__ import annotations
@@ -20,7 +20,10 @@ if __package__ in (None, ""):
     import pathlib
     import sys
 
-    sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
+    root = pathlib.Path(__file__).resolve()
+    while root != root.parent and not (root / "pyproject.toml").exists():
+        root = root.parent
+    sys.path.insert(0, str(root / "src"))
 
 import argparse
 
@@ -32,6 +35,7 @@ from torus_solver import biot_savart_surface, ideal_toroidal_field, make_torus_s
 from torus_solver.biot_savart import MU0
 from torus_solver.fieldline import trace_field_line
 from torus_solver.fields import cylindrical_coords, cylindrical_unit_vectors
+from torus_solver.paraview import fieldlines_to_vtu, point_cloud_to_vtu, torus_surface_to_vtu, write_vtm, write_vtu
 from torus_solver.plotting import ensure_dir, plot_3d_torus, plot_fieldline, savefig, set_plot_style
 import torus_solver.plotting as tplot
 
@@ -46,9 +50,10 @@ def main() -> None:
     p.add_argument("--n-phi", type=int, default=128)
     p.add_argument("--B0", type=float, default=1e-3, help="Toroidal field at R=R0 (T)")
     p.add_argument("--n", type=int, default=800, help="Trace steps")
-    p.add_argument("--outdir", type=str, default="figures/trace_fieldlines_shell_toroidal_field")
+    p.add_argument("--outdir", type=str, default="figures/shell_toroidal_fieldlines")
     p.add_argument("--dpi", type=int, default=300)
     p.add_argument("--no-plots", action="store_true")
+    p.add_argument("--no-paraview", action="store_true", help="Disable ParaView (.vtu/.vtm) outputs")
     p.add_argument("--plot-stride", type=int, default=3)
     args = p.parse_args()
 
@@ -93,6 +98,44 @@ def main() -> None:
     print(f"  traced_points={pts.shape[0]} sampled={sample.shape[0]}")
     print(f"  |B_an| mean={float(jnp.mean(jnp.linalg.norm(B_an, axis=-1))):.3e} T")
     print(f"  Biot–Savart vs analytic: max_abs={float(jnp.max(err)):.3e} T  max_rel={float(jnp.max(rel)):.3e}")
+
+    if not args.no_paraview:
+        outdir_p = ensure_dir(args.outdir)
+        pv_dir = ensure_dir(outdir_p / "paraview")
+
+        Kmag = np.asarray(jnp.linalg.norm(K, axis=-1)).reshape(-1)
+        surf_pd = {
+            "K": np.asarray(K).reshape(-1, 3),
+            "|K|": Kmag,
+            "Ktheta_const_A_per_m": np.full_like(Kmag, float(Ktheta)),
+        }
+        surf_vtu = write_vtu(pv_dir / "winding_surface.vtu", torus_surface_to_vtu(surface=surface, point_data=surf_pd))
+
+        traj = np.asarray(pts, dtype=float)[None, :, :]
+        B_traj = np.asarray(ideal_toroidal_field(jnp.asarray(pts, dtype=jnp.float64), B0=args.B0, R0=args.R0))
+        line_pd = {"B_analytic": B_traj}
+        line_vtu = write_vtu(pv_dir / "fieldline.vtu", fieldlines_to_vtu(traj=traj, point_data=line_pd))
+
+        sample_pd = {
+            "B_bs": np.asarray(B_bs),
+            "B_analytic": np.asarray(B_an),
+            "abs_err": np.asarray(err),
+            "rel_err": np.asarray(rel),
+        }
+        sample_vtu = write_vtu(
+            pv_dir / "sample_points.vtu",
+            point_cloud_to_vtu(points=np.asarray(sample), point_data=sample_pd),
+        )
+
+        scene = write_vtm(
+            pv_dir / "scene.vtm",
+            {
+                "winding_surface": surf_vtu.name,
+                "fieldline": line_vtu.name,
+                "sample_points": sample_vtu.name,
+            },
+        )
+        print(f"ParaView scene: {scene}")
 
     if not args.no_plots:
         pts_np = np.asarray(pts)

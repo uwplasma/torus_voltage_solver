@@ -108,7 +108,7 @@ class CutGUIConfig:
 @dataclass(frozen=True)
 class VmecOptGUIConfig:
     # VMEC target surface (boundary) inside the circular torus.
-    vmec_input: str = "input.QA_nfp2"
+    vmec_input: str = "examples/data/vmec/input.QA_nfp2"
     surf_n_theta: int = 32
     surf_n_phi: int = 56
     fit_margin: float = 0.7
@@ -173,18 +173,22 @@ def _resolve_vmec_input_path(vmec_input: str) -> Path:
     if p.exists():
         return p
 
-    # When running from `torus_solver/`, examples are at `<repo>/examples/`.
     repo_root = Path(__file__).resolve().parents[2]
-    cand = repo_root / "examples" / vmec_input
-    if cand.exists():
-        return cand
+    candidates = [
+        repo_root / vmec_input,  # allow paths relative to repo root
+        repo_root / "examples" / vmec_input,
+        repo_root / "examples" / "data" / "vmec" / Path(vmec_input).name,
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return cand
 
     msg = (
         "VMEC input file not found.\n"
         f"  got: {vmec_input}\n"
         f"  tried: {p.resolve()}\n"
-        f"  tried: {cand}\n"
-        "Tip: run with `--vmec-input examples/input.QA_nfp2` (from `torus_solver/`)."
+        + "".join(f"  tried: {c}\n" for c in candidates)
+        + "Tip: run with `--vmec-input examples/data/vmec/input.QA_nfp2` (from the repo root).\n"
     )
     raise FileNotFoundError(msg)
 
@@ -517,6 +521,7 @@ class TorusElectrodeGUI:  # pragma: no cover
             "  c: cycle surface scalar (|K|, V, s, Kθ, Kφ)\n"
             "  f: toggle field lines\n"
             "  r: recompute\n"
+            "  e: export ParaView (.vtu/.vtm)\n"
             "  i (or v): type selected I\n"
             "  s: save screenshot\n"
         )
@@ -839,6 +844,8 @@ class TorusElectrodeGUI:  # pragma: no cover
         elif key_sym in ("r", "R"):
             self.update_solution()
             return
+        elif key_sym in ("e", "E"):
+            self._export_paraview()
         elif key_sym in ("s", "S"):
             self._save_screenshot()
         self._update_text()
@@ -901,6 +908,68 @@ class TorusElectrodeGUI:  # pragma: no cover
         writer.SetInputConnection(w2i.GetOutputPort())
         writer.Write()
         print(f"Saved screenshot: {path}")
+
+    def _export_paraview(self) -> None:
+        from .paraview import fieldlines_to_vtu, point_cloud_to_vtu, torus_surface_to_vtu, write_vtm, write_vtu
+
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        outdir = Path("paraview") / f"gui_torus_electrodes_{ts}"
+        outdir.mkdir(parents=True, exist_ok=True)
+
+        V = self._cache.get("V")
+        s = self._cache.get("s")
+        Ktheta = self._cache.get("Ktheta")
+        Kphi = self._cache.get("Kphi")
+        Kmag = self._cache.get("Kmag")
+        if V is None or s is None or Ktheta is None or Kphi is None or Kmag is None:
+            print("ParaView export: no cached solution yet.")
+            return
+
+        e_theta = np.asarray(self._e_theta, dtype=float)
+        e_phi = np.asarray(self._e_phi, dtype=float)
+        K_vec = Ktheta[..., None] * e_theta + Kphi[..., None] * e_phi
+
+        surf = write_vtu(
+            outdir / "winding_surface.vtu",
+            torus_surface_to_vtu(
+                surface=self.surface,
+                point_data={
+                    "V": V.reshape(-1),
+                    "s": s.reshape(-1),
+                    "K": K_vec.reshape(-1, 3),
+                    "Ktheta": Ktheta.reshape(-1),
+                    "Kphi": Kphi.reshape(-1),
+                    "|K|": Kmag.reshape(-1),
+                },
+            ),
+        )
+
+        blocks: dict[str, str] = {"winding_surface": surf.name}
+
+        active = np.flatnonzero(self.active > 0.0)
+        if active.size > 0:
+            xyz = torus_xyz(self.cfg.R0, self.cfg.a, self.theta_src[active], self.phi_src[active])
+            I = (
+                np.asarray(self._Iproj_cache, dtype=float)[active]
+                if self._Iproj_cache is not None
+                else np.asarray(self.currents_raw, dtype=float)[active]
+            )
+            elec = write_vtu(
+                outdir / "electrodes.vtu",
+                point_cloud_to_vtu(
+                    points=np.asarray(xyz, dtype=float),
+                    point_data={"I_A": I, "sign_I": np.sign(I)},
+                ),
+            )
+            blocks["electrodes"] = elec.name
+
+        if self.show_fieldlines and self._traj_cache is not None:
+            traj_pv = np.transpose(self._traj_cache, (1, 0, 2))
+            fl = write_vtu(outdir / "fieldlines.vtu", fieldlines_to_vtu(traj=traj_pv))
+            blocks["fieldlines"] = fl.name
+
+        scene = write_vtm(outdir / "scene.vtm", blocks)
+        print(f"Saved ParaView scene: {scene}")
 
     def run(self) -> None:
         print("Starting GUI. Close the window to exit.")
@@ -1236,6 +1305,7 @@ class TorusCutVoltageGUI:  # pragma: no cover
             "  c: cycle scalar (|K|, V, s, Kθ, Kφ)\n"
             "  f: toggle field lines    r: recompute\n"
             "  v: type V_cut    i: type selected I\n"
+            "  e: export ParaView (.vtu/.vtm)\n"
             "  s: save screenshot\n"
         )
 
@@ -1608,6 +1678,8 @@ class TorusCutVoltageGUI:  # pragma: no cover
         elif key_sym in ("r", "R"):
             self.update_solution()
             return
+        elif key_sym in ("e", "E"):
+            self._export_paraview()
         elif key_sym in ("s", "S"):
             self._save_screenshot()
 
@@ -1671,6 +1743,76 @@ class TorusCutVoltageGUI:  # pragma: no cover
         writer.SetInputConnection(w2i.GetOutputPort())
         writer.Write()
         print(f"Saved screenshot: {path}")
+
+    def _export_paraview(self) -> None:
+        from .paraview import fieldlines_to_vtu, point_cloud_to_vtu, torus_surface_to_vtu, write_vtm, write_vtu
+
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        outdir = Path("paraview") / f"gui_torus_cut_{ts}"
+        outdir.mkdir(parents=True, exist_ok=True)
+
+        V = self._cache.get("V")
+        s = self._cache.get("s")
+        Ktheta = self._cache.get("Ktheta")
+        Kphi = self._cache.get("Kphi")
+        Kmag = self._cache.get("Kmag")
+        if V is None or s is None or Ktheta is None or Kphi is None or Kmag is None:
+            print("ParaView export: no cached solution yet.")
+            return
+
+        e_theta = np.asarray(self._e_theta, dtype=float)
+        e_phi = np.asarray(self._e_phi, dtype=float)
+        K_vec = Ktheta[..., None] * e_theta + Kphi[..., None] * e_phi
+
+        surf = write_vtu(
+            outdir / "winding_surface.vtu",
+            torus_surface_to_vtu(
+                surface=self.surface,
+                point_data={
+                    "V": V.reshape(-1),
+                    "s": s.reshape(-1),
+                    "K": K_vec.reshape(-1, 3),
+                    "Ktheta": Ktheta.reshape(-1),
+                    "Kphi": Kphi.reshape(-1),
+                    "|K|": Kmag.reshape(-1),
+                    "V_cut": np.full((V.size,), float(self.V_cut), dtype=float),
+                },
+            ),
+        )
+        blocks: dict[str, str] = {"winding_surface": surf.name}
+
+        active = np.flatnonzero(self.active > 0.0)
+        if active.size > 0:
+            xyz = torus_xyz(self.cfg.R0, self.cfg.a, self.theta_src[active], self.phi_src[active])
+            I = (
+                np.asarray(self._Iproj_cache, dtype=float)[active]
+                if self._Iproj_cache is not None
+                else np.asarray(self.currents_raw, dtype=float)[active]
+            )
+            elec = write_vtu(
+                outdir / "electrodes.vtu",
+                point_cloud_to_vtu(
+                    points=np.asarray(xyz, dtype=float),
+                    point_data={"I_A": I, "sign_I": np.sign(I)},
+                ),
+            )
+            blocks["electrodes"] = elec.name
+
+        # Cut ring (where the potential jump is placed), exported as a point cloud for reference.
+        theta0 = float(self.cfg.theta_cut) % (2 * np.pi)
+        phi_line = np.linspace(0.0, 2 * np.pi, 80, endpoint=False)
+        theta_line = theta0 * np.ones_like(phi_line)
+        cut_xyz = torus_xyz(self.cfg.R0, self.cfg.a, theta_line, phi_line)
+        cut = write_vtu(outdir / "cut_ring.vtu", point_cloud_to_vtu(points=cut_xyz))
+        blocks["cut_ring"] = cut.name
+
+        if self.show_fieldlines and self._traj_cache is not None:
+            traj_pv = np.transpose(self._traj_cache, (1, 0, 2))
+            fl = write_vtu(outdir / "fieldlines.vtu", fieldlines_to_vtu(traj=traj_pv))
+            blocks["fieldlines"] = fl.name
+
+        scene = write_vtm(outdir / "scene.vtm", blocks)
+        print(f"Saved ParaView scene: {scene}")
 
     def run(self) -> None:
         print("Starting cut+electrodes GUI. Close the window to exit.")
@@ -2229,6 +2371,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
             "  c: cycle torus scalar (|K|, V, s, Kθ, Kφ)\n"
             "  f: toggle field lines\n"
             "  r: recompute\n"
+            "  e: export ParaView (.vtu/.vtm)\n"
             "  i (or v): type selected electrode current [A]\n"
             "  b: type background B0 [T]\n"
             "  k: type current_scale [A/unit]\n"
@@ -2684,6 +2827,8 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         elif key_sym in ("r", "R"):
             self.update_solution()
             return
+        elif key_sym in ("e", "E"):
+            self._export_paraview()
         elif key_sym in ("s", "S"):
             self._save_screenshot()
 
@@ -2746,6 +2891,79 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         writer.SetInputConnection(w2i.GetOutputPort())
         writer.Write()
         print(f"Saved screenshot: {path}")
+
+    def _export_paraview(self) -> None:
+        from .paraview import fieldlines_to_vtu, point_cloud_to_vtu, torus_surface_to_vtu, write_vtm, write_vtu
+
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        outdir = Path("paraview") / f"gui_torus_vmec_opt_{ts}"
+        outdir.mkdir(parents=True, exist_ok=True)
+
+        V = self._cache.get("V")
+        s = self._cache.get("s")
+        Ktheta = self._cache.get("Ktheta")
+        Kphi = self._cache.get("Kphi")
+        Kmag = self._cache.get("Kmag")
+        if V is None or s is None or Ktheta is None or Kphi is None or Kmag is None:
+            print("ParaView export: no cached winding-surface solution yet.")
+            return
+
+        e_theta = np.asarray(self._e_theta, dtype=float)
+        e_phi = np.asarray(self._e_phi, dtype=float)
+        K_vec = Ktheta[..., None] * e_theta + Kphi[..., None] * e_phi
+
+        surf = write_vtu(
+            outdir / "winding_surface.vtu",
+            torus_surface_to_vtu(
+                surface=self.surface,
+                point_data={
+                    "V": V.reshape(-1),
+                    "s": s.reshape(-1),
+                    "K": K_vec.reshape(-1, 3),
+                    "Ktheta": Ktheta.reshape(-1),
+                    "Kphi": Kphi.reshape(-1),
+                    "|K|": Kmag.reshape(-1),
+                },
+            ),
+        )
+
+        blocks: dict[str, str] = {"winding_surface": surf.name}
+
+        # Target points (VMEC surface) with Bn/B scalar if available.
+        tgt_pts = np.asarray(self._target_points, dtype=float)
+        pd = {
+            "n_hat": np.asarray(self._target_normals, dtype=float),
+            "weight": np.asarray(self._target_weights, dtype=float),
+        }
+        if self._target_Bn_over_B_cache is not None:
+            pd["Bn_over_B"] = np.asarray(self._target_Bn_over_B_cache, dtype=float)
+        tgt = write_vtu(outdir / "target_points.vtu", point_cloud_to_vtu(points=tgt_pts, point_data=pd))
+        blocks["target_points"] = tgt.name
+
+        active = np.flatnonzero(self.active > 0.0)
+        if active.size > 0:
+            xyz = torus_xyz(self.cfg.R0, self.cfg.a, self.theta_src[active], self.phi_src[active])
+            I = (
+                np.asarray(self._Iproj_cache, dtype=float)[active]
+                if self._Iproj_cache is not None
+                else np.asarray(self.currents_raw, dtype=float)[active] * float(self.current_scale)
+            )
+            elec = write_vtu(
+                outdir / "electrodes.vtu",
+                point_cloud_to_vtu(
+                    points=np.asarray(xyz, dtype=float),
+                    point_data={"I_A": I, "sign_I": np.sign(I)},
+                ),
+            )
+            blocks["electrodes"] = elec.name
+
+        if self.show_fieldlines and self._traj_cache is not None:
+            traj_pv = np.transpose(self._traj_cache, (1, 0, 2))
+            fl = write_vtu(outdir / "fieldlines.vtu", fieldlines_to_vtu(traj=traj_pv))
+            blocks["fieldlines"] = fl.name
+
+        scene = write_vtm(outdir / "scene.vtm", blocks)
+        print(f"Saved ParaView scene: {scene}")
 
     def run(self) -> None:
         print("Starting VMEC (B·n)/|B| optimization GUI. Close the window to exit.")

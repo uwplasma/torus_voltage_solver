@@ -2,7 +2,7 @@
 """Example: optimize source/sink electrodes to reproduce a helical field on-axis.
 
 Run:
-  - `python examples/optimize_helical_field.py`
+  - `python examples/2_intermediate/optimize_helical_axis_field.py`
 """
 
 from __future__ import annotations
@@ -11,7 +11,10 @@ if __package__ in (None, ""):
     import pathlib
     import sys
 
-    sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
+    root = pathlib.Path(__file__).resolve()
+    while root != root.parent and not (root / "pyproject.toml").exists():
+        root = root.parent
+    sys.path.insert(0, str(root / "src"))
 
 import argparse
 import time
@@ -30,6 +33,7 @@ from torus_solver.optimize import (
     optimize_sources_lbfgs,
     surface_solution,
 )
+from torus_solver.paraview import fieldlines_to_vtu, point_cloud_to_vtu, torus_surface_to_vtu, write_vtm, write_vtu
 from torus_solver.plotting import (
     ensure_dir,
     plot_3d_torus,
@@ -62,9 +66,10 @@ def main() -> None:
     p.add_argument("--lbfgs-tol", type=float, default=1e-9)
     p.add_argument("--n-steps", type=int, default=200)
     p.add_argument("--lr", type=float, default=1e-2)
-    p.add_argument("--outdir", type=str, default="figures/optimize_helical_field")
+    p.add_argument("--outdir", type=str, default="figures/optimize_helical_axis_field")
     p.add_argument("--dpi", type=int, default=300)
     p.add_argument("--no-plots", action="store_true")
+    p.add_argument("--no-paraview", action="store_true", help="Disable ParaView (.vtu/.vtm) outputs")
     p.add_argument("--plot-stride", type=int, default=3, help="Decimation stride for 3D torus wireframe")
     p.add_argument("--no-fieldlines", action="store_true", help="Disable final 3D field-line plot (faster)")
     p.add_argument("--n-fieldlines", type=int, default=12)
@@ -76,15 +81,20 @@ def main() -> None:
     if args.B1 is None:
         args.B1 = 0.25 * args.B0
 
-    if not args.no_plots:
-        set_plot_style()
+    outdir = None
+    if (not args.no_plots) or (not args.no_paraview):
         outdir = ensure_dir(args.outdir)
-        ensure_dir(outdir / "surface")
-        ensure_dir(outdir / "axis")
-        ensure_dir(outdir / "optim")
-        ensure_dir(outdir / "geometry")
-        ensure_dir(outdir / "fieldlines")
-        print(f"Saving figures to: {outdir}")
+        if not args.no_plots:
+            set_plot_style()
+            ensure_dir(outdir / "surface")
+            ensure_dir(outdir / "axis")
+            ensure_dir(outdir / "optim")
+            ensure_dir(outdir / "geometry")
+            ensure_dir(outdir / "fieldlines")
+            print(f"Saving figures to: {outdir}")
+        if not args.no_paraview:
+            ensure_dir(outdir / "paraview")
+            print(f"Saving ParaView outputs to: {outdir / 'paraview'}")
 
     surface = make_torus_surface(R0=args.R0, a=args.a, n_theta=args.n_theta, n_phi=args.n_phi)
 
@@ -178,14 +188,11 @@ def main() -> None:
     print(f"final_rms={float(rms):.6e} T  wall_time_s={t1 - t0:.2f}")
     print(f"net_current={float(jnp.sum(enforce_net_zero(best.currents_raw))):+.3e} A")
 
-    if not args.no_plots:
-        # Surface fields (init/final) for 2D maps.
-        currents0, s0, V0, K0 = surface_solution(
-            surface, init, sigma_theta=sigma_theta, sigma_phi=sigma_phi
-        )
-        currents1, s1, V1, K1 = surface_solution(
-            surface, best, sigma_theta=sigma_theta, sigma_phi=sigma_phi
-        )
+    need_surface_fields = (not args.no_plots) or (not args.no_paraview)
+    if need_surface_fields:
+        # Surface fields (init/final) for maps + ParaView.
+        currents0, s0, V0, K0 = surface_solution(surface, init, sigma_theta=sigma_theta, sigma_phi=sigma_phi)
+        currents1, s1, V1, K1 = surface_solution(surface, best, sigma_theta=sigma_theta, sigma_phi=sigma_phi)
 
         e_theta = surface.r_theta / surface.a
         e_phi_s = surface.r_phi / jnp.sqrt(surface.G)[..., None]
@@ -193,6 +200,135 @@ def main() -> None:
         Kphi0 = jnp.sum(K0 * e_phi_s, axis=-1)
         Ktheta1 = jnp.sum(K1 * e_theta, axis=-1)
         Kphi1 = jnp.sum(K1 * e_phi_s, axis=-1)
+        Kmag0 = jnp.sqrt(Ktheta0 * Ktheta0 + Kphi0 * Kphi0)
+        Kmag1 = jnp.sqrt(Ktheta1 * Ktheta1 + Kphi1 * Kphi1)
+
+    traj_np = None
+    if need_surface_fields and (not args.no_fieldlines):
+        print("Tracing field lines for final solution (Biot–Savart)...")
+        from torus_solver.biot_savart import biot_savart_surface
+        from torus_solver.fieldline import trace_field_lines_batch
+
+        theta_seed = jnp.linspace(0.0, 2 * jnp.pi, args.n_fieldlines, endpoint=False)
+        rho = 0.5 * surface.a
+        R_seed = surface.R0 + rho * jnp.cos(theta_seed)
+        Z_seed = rho * jnp.sin(theta_seed)
+        seeds = jnp.stack([R_seed, jnp.zeros_like(R_seed), Z_seed], axis=-1)
+
+        def B_fn(xyz: jnp.ndarray) -> jnp.ndarray:
+            return biot_savart_surface(surface, K1, xyz, eps=float(args.biot_savart_eps))
+
+        traj = jax.jit(
+            lambda x0: trace_field_lines_batch(
+                B_fn,
+                x0,
+                step_size=float(args.fieldline_ds),
+                n_steps=int(args.fieldline_steps),
+                normalize=True,
+            )
+        )(seeds)
+        traj.block_until_ready()
+        traj_np = np.asarray(traj)
+
+    if not args.no_paraview:
+        assert outdir is not None
+        pv_dir = ensure_dir(outdir / "paraview")
+
+        # Surface datasets (init/final).
+        surf_init = write_vtu(
+            pv_dir / "winding_surface_init.vtu",
+            torus_surface_to_vtu(
+                surface=surface,
+                point_data={
+                    "V": np.asarray(V0).reshape(-1),
+                    "s": np.asarray(s0).reshape(-1),
+                    "K": np.asarray(K0).reshape(-1, 3),
+                    "Ktheta": np.asarray(Ktheta0).reshape(-1),
+                    "Kphi": np.asarray(Kphi0).reshape(-1),
+                    "|K|": np.asarray(Kmag0).reshape(-1),
+                },
+            ),
+        )
+        surf_final = write_vtu(
+            pv_dir / "winding_surface_final.vtu",
+            torus_surface_to_vtu(
+                surface=surface,
+                point_data={
+                    "V": np.asarray(V1).reshape(-1),
+                    "s": np.asarray(s1).reshape(-1),
+                    "K": np.asarray(K1).reshape(-1, 3),
+                    "Ktheta": np.asarray(Ktheta1).reshape(-1),
+                    "Kphi": np.asarray(Kphi1).reshape(-1),
+                    "|K|": np.asarray(Kmag1).reshape(-1),
+                },
+            ),
+        )
+
+        # Electrode point clouds.
+        def torus_xyz(theta, phi):
+            R = args.R0 + args.a * np.cos(theta)
+            return np.stack([R * np.cos(phi), R * np.sin(phi), args.a * np.sin(theta)], axis=-1)
+
+        el0_xyz = torus_xyz(np.asarray(init.theta_src), np.asarray(init.phi_src))
+        el1_xyz = torus_xyz(np.asarray(best.theta_src), np.asarray(best.phi_src))
+        el_init = write_vtu(
+            pv_dir / "electrodes_init.vtu",
+            point_cloud_to_vtu(
+                points=el0_xyz,
+                point_data={
+                    "I_A": np.asarray(currents0, dtype=float),
+                    "I_raw": np.asarray(init.currents_raw, dtype=float),
+                    "sign_I": np.sign(np.asarray(currents0, dtype=float)),
+                },
+            ),
+        )
+        el_final = write_vtu(
+            pv_dir / "electrodes_final.vtu",
+            point_cloud_to_vtu(
+                points=el1_xyz,
+                point_data={
+                    "I_A": np.asarray(currents1, dtype=float),
+                    "I_raw": np.asarray(best.currents_raw, dtype=float),
+                    "sign_I": np.sign(np.asarray(currents1, dtype=float)),
+                },
+            ),
+        )
+
+        # Axis curve (polyline) with target/init/final B vectors.
+        axis_vtu = write_vtu(
+            pv_dir / "axis.vtu",
+            fieldlines_to_vtu(
+                traj=np.asarray(points, dtype=float)[None, :, :],
+                point_data={
+                    "B_target": np.asarray(B_target, dtype=float),
+                    "B_init": np.asarray(B_init, dtype=float),
+                    "B_final": np.asarray(B_final, dtype=float),
+                },
+            ),
+        )
+
+        blocks: dict[str, str] = {
+            "winding_surface_init": surf_init.name,
+            "winding_surface_final": surf_final.name,
+            "electrodes_init": el_init.name,
+            "electrodes_final": el_final.name,
+            "axis": axis_vtu.name,
+        }
+        if traj_np is not None:
+            # `trace_field_lines_batch` returns (n_steps+1, n_lines, 3), while ParaView
+            # polylines are easiest to write as (n_lines, n_points, 3).
+            traj_pv = np.transpose(traj_np, (1, 0, 2))
+            fl_vtu = write_vtu(
+                pv_dir / "fieldlines_final.vtu",
+                fieldlines_to_vtu(traj=traj_pv),
+            )
+            blocks["fieldlines_final"] = fl_vtu.name
+
+        scene = write_vtm(pv_dir / "scene.vtm", blocks)
+        print(f"ParaView scene: {scene}")
+
+    if not args.no_plots:
+        assert outdir is not None
 
         # 2D surface maps (θ vertical, φ horizontal).
         phi_grid = np.asarray(surface.phi)
@@ -343,34 +479,10 @@ def main() -> None:
         )
 
         # 3D field lines (final), using Biot–Savart from the optimized surface currents.
-        if not args.no_fieldlines:
-            print("Tracing field lines for final solution (Biot–Savart)...")
-            from torus_solver.biot_savart import biot_savart_surface
-            from torus_solver.fieldline import trace_field_lines_batch
-
-            theta_seed = jnp.linspace(0.0, 2 * jnp.pi, args.n_fieldlines, endpoint=False)
-            rho = 0.5 * surface.a
-            R_seed = surface.R0 + rho * jnp.cos(theta_seed)
-            Z_seed = rho * jnp.sin(theta_seed)
-            seeds = jnp.stack([R_seed, jnp.zeros_like(R_seed), Z_seed], axis=-1)
-
-            def B_fn(xyz: jnp.ndarray) -> jnp.ndarray:
-                return biot_savart_surface(surface, K1, xyz, eps=float(args.biot_savart_eps))
-
-            traj = jax.jit(
-                lambda x0: trace_field_lines_batch(
-                    B_fn,
-                    x0,
-                    step_size=float(args.fieldline_ds),
-                    n_steps=int(args.fieldline_steps),
-                    normalize=True,
-                )
-            )(seeds)
-            traj.block_until_ready()
-
+        if traj_np is not None:
             plot_fieldlines_3d(
                 torus_xyz=np.asarray(surface.r),
-                traj=np.asarray(traj),
+                traj=traj_np,
                 stride=args.plot_stride,
                 line_stride=1,
                 title="Final field lines (Biot–Savart from optimized surface currents)",
