@@ -8,7 +8,7 @@
 
 ## Install (editable, recommended for research)
 
-From `torus_solver/`:
+From the repo root (`torus_voltage_solver/`):
 
 ```bash
 pip install -e .
@@ -43,7 +43,7 @@ pytest -q
 
 ## Build the documentation locally
 
-From `torus_solver/`:
+From the repo root (`torus_voltage_solver/`):
 
 ```bash
 pip install -e '.[docs]'
@@ -54,4 +54,3 @@ open docs/_build/html/index.html
 :::{note}
 The documentation uses MathJax for equations. This works in the built HTML output automatically.
 :::
-

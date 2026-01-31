@@ -61,7 +61,7 @@ which is equivalent to $\hat{\mathbf n}\times \nabla_s \Phi$.
 
 In the code:
 
-- `torus_solver/src/torus_solver/current_potential.py`
+- `src/torus_solver/current_potential.py`
   - `surface_current_from_current_potential(...)` (single-valued $\Phi$ only)
   - `surface_current_from_current_potential_with_net_currents(...)` (recommended)
 
@@ -75,4 +75,3 @@ REGCOIL solves a regularized least-squares problem for $\Phi$ on a coil surface,
   - L-BFGS (from `jaxopt`) and JAX autodiff
 
 This makes it easy to experiment with differentiable extensions (new objectives, constraints, and parameterizations) while remaining close to the REGCOIL viewpoint.
-

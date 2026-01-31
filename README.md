@@ -15,7 +15,7 @@ but it is designed to plug into that workflow later.
 This project uses a standard `src/` layout:
 
 ```
-torus_solver/
+torus_voltage_solver/
   pyproject.toml
   README.md
   docs/                      # Read the Docs / Sphinx documentation
@@ -29,7 +29,7 @@ torus_solver/
 
 ## Quickstart
 
-From `torus_solver/`:
+From the repo root (`torus_voltage_solver/`):
 
 ```bash
 pytest
@@ -37,6 +37,17 @@ python examples/trace_fieldlines_tokamak.py
 python examples/optimize_helical_field.py --n-steps 50
 python examples/scan_vmec_surface_regularization.py --vmec-input examples/input.QA_nfp2
 ```
+
+## Gallery
+
+<p align="center">
+  <img src="docs/_static/images/helical_fieldlines_final.png" width="48%" alt="Electrode-driven helical optimization: final field lines" />
+  <img src="docs/_static/images/vmec_Bn_over_B_best.png" width="48%" alt="VMEC target: optimized Bn/B map" />
+</p>
+<p align="center">
+  <img src="docs/_static/images/vmec_regK_scan_lcurve.png" width="48%" alt="REGCOIL-style regularization scan (tradeoff curve)" />
+  <img src="docs/_static/images/tokamak_fieldline_3d.png" width="48%" alt="Tokamak-like analytic field line (3D)" />
+</p>
 
 ## Install (editable)
 
@@ -246,7 +257,7 @@ publication-style figures to `figures/<example_name>/`. Each script accepts:
 - `--outdir ...` to change where figures are written
 - `--no-plots` to disable plotting (faster)
 
-From `torus_solver/`:
+From the repo root (`torus_voltage_solver/`):
 
 - Interactive 3D GUIs (VTK):
   - Requires VTK: `pip install vtk` (or `pip install -e .[gui]` if you install extras)
@@ -324,7 +335,7 @@ From `torus_solver/`:
 
 ## Benchmarks
 
-From `torus_solver/`:
+From the repo root (`torus_voltage_solver/`):
 
 ```bash
 python benchmarks/bench_forward_and_grad.py

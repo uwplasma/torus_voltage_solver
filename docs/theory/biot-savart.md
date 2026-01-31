@@ -51,5 +51,4 @@ The direct sum is $O(N_\text{eval} N_\text{surf})$. For research workflows this 
 - FFT-based convolution methods (with careful treatment of geometry)
 - hierarchical / adaptive sampling
 
-In this repository, `torus_solver/src/torus_solver/biot_savart.py` implements a **chunked** evaluation mode to reduce peak memory pressure when `N_eval` is large.
-
+In this repository, `src/torus_solver/biot_savart.py` implements a **chunked** evaluation mode to reduce peak memory pressure when `N_eval` is large.

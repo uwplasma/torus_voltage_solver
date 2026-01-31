@@ -20,23 +20,23 @@ Key validations include:
 - **Current potential secular terms**:
   - For $\Phi = (I_\mathrm{pol}/2\pi)\phi$, the magnitude satisfies $|K| = I_\mathrm{pol}/(2\pi R(\theta))$.
   - For $\Phi = (I_\mathrm{tor}/2\pi)\theta$, the magnitude satisfies $|K| = I_\mathrm{tor}/(2\pi a)$ (constant).
-  - Tests: `torus_solver/tests/test_current_potential.py`
+  - Tests: `tests/test_current_potential.py`
 
 - **REGCOIL cross-check (axisymmetric sanity test)**:
   - If the REGCOIL netCDF output exists locally, we compare `max|K|` against `torus-solver` for the same torus and net current.
-  - Test: `torus_solver/tests/test_current_potential.py`
+  - Test: `tests/test_current_potential.py`
 
 - **Divergence-free current potential currents**:
   - The current-potential model should satisfy $\nabla_s\cdot\mathbf K = 0$ (up to discretization error).
-  - Test: `torus_solver/tests/test_surface_ops.py`
+  - Test: `tests/test_surface_ops.py`
 
 - **Target-surface fitting sanity**:
   - VMEC surfaces are shifted/scaled so they fit inside the circular torus with a `fit_margin`.
-  - Test: `torus_solver/tests/test_targets.py`
+  - Test: `tests/test_targets.py`
 
 - **Normalized normal-field metrics**:
   - Basic sanity tests for `Bn/B`, weighted RMS, and weighted p-norm utilities.
-  - Test: `torus_solver/tests/test_metrics.py`
+  - Test: `tests/test_metrics.py`
 
 ## Recommended additional validations for new research
 

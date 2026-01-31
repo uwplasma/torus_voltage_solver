@@ -62,8 +62,7 @@ The sign of $\hat{\mathbf n}$ matters for conventions (e.g. the sign of $B\cdot 
 
 ## Where this lives in the code
 
-- Surface construction: `torus_solver/src/torus_solver/torus.py`
+- Surface construction: `src/torus_solver/torus.py`
   - `make_torus_surface(...)` produces:
     - `r`, `r_theta`, `r_phi`
     - metric/area quantities like `sqrt_g`, `G`, `area_weights`
-

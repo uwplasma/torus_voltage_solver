@@ -31,7 +31,7 @@ Driving $(B\cdot\hat n)/|B| \to 0$ on a single interior surface is **not suffici
 
 ## Quickstart (run scripts)
 
-From the package root `torus_solver/`:
+From the repo root (`torus_voltage_solver/`):
 
 ```bash
 pytest -q

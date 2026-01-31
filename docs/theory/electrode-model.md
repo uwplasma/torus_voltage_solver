@@ -60,14 +60,13 @@ In the code, $w_i$ is a periodic Gaussian in $(\theta,\phi)$ controlled by `sigm
 
 ## Where this lives in the code
 
-- Electrode deposition: `torus_solver/src/torus_solver/sources.py`
+- Electrode deposition: `src/torus_solver/sources.py`
   - `deposit_current_sources(...)`
-- Poisson solve: `torus_solver/src/torus_solver/poisson.py`
+- Poisson solve: `src/torus_solver/poisson.py`
   - `solve_current_potential(...)`
-- Current from potential: `torus_solver/src/torus_solver/poisson.py`
+- Current from potential: `src/torus_solver/poisson.py`
   - `surface_current_from_potential(...)`
 
 :::{warning}
 This is a simplified electrostatic model. It is useful for algorithm development, differentiable optimization, and intuition — but it does not model the full Maxwell boundary-value problem of a real conductor with contacts, finite thickness, and electromagnetic coupling.
 :::
-

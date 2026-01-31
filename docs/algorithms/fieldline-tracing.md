@@ -25,7 +25,7 @@ The code uses fixed-step RK4 and JAX control-flow:
 - `jax.lax.scan` for the loop (fast and JIT-friendly)
 - batch tracing via `trace_field_lines_batch` (scan over all lines simultaneously)
 
-Implementation: `torus_solver/src/torus_solver/fieldline.py`.
+Implementation: `src/torus_solver/fieldline.py`.
 
 ## Interpreting drift from a target surface
 
@@ -40,4 +40,3 @@ In `examples/optimize_vmec_surface_Bn.py`, a simple drift diagnostic measures th
 :::{tip}
 When diagnosing drift, always check convergence with smaller step sizes and compare multiple seeds.
 :::
-

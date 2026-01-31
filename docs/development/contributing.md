@@ -4,7 +4,7 @@ This repository is intended to be a research codebase that remains readable and 
 
 ## Development install
 
-From `torus_solver/`:
+From the repo root (`torus_voltage_solver/`):
 
 ```bash
 python -m venv .venv
@@ -49,4 +49,3 @@ If you want to add new research features, common extension points are:
 - Include **units** and sign conventions in new code and docs.
 - Add at least one **validation test** for any new physical model component.
 - When changing an algorithm, add a small regression test that would have caught common mistakes (e.g. wrong factor of $2\pi$, wrong normalization, wrong current sign).
-

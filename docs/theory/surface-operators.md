@@ -68,7 +68,7 @@ $$
 \frac{\partial f}{\partial x} \approx \mathcal{F}^{-1}\left( i k\, \mathcal{F}(f)\right),
 $$
 
-implemented in `torus_solver/src/torus_solver/spectral.py`.
+implemented in `src/torus_solver/spectral.py`.
 
 ### Poisson solve
 
@@ -85,5 +85,4 @@ with:
 - a **net-zero** constraint on $s$ (closed surface)
 - a **gauge** fix on $V$ (remove the constant nullspace)
 
-See `torus_solver/src/torus_solver/poisson.py`.
-
+See `src/torus_solver/poisson.py`.
