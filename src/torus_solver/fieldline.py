@@ -22,8 +22,8 @@ def trace_field_line(
     """Trace a single magnetic field line using fixed-step RK4.
 
     The integration variable is an arbitrary "time" parameter. If `normalize=True`,
-    we trace the unit vector b = B/|B| so the step size is roughly a spatial arc
-    length (in meters if coordinates are meters).
+    we trace the unit vector b = B / norm(B) so the step size is roughly a spatial
+    arc length (in meters if coordinates are meters).
 
     `B_fn` must accept points of shape (...,3) and return B of shape (...,3).
     """

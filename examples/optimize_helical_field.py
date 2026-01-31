@@ -27,6 +27,7 @@ from torus_solver.optimize import (
     forward_B,
     make_helical_axis_points,
     optimize_sources,
+    optimize_sources_lbfgs,
     surface_solution,
 )
 from torus_solver.plotting import (
@@ -57,6 +58,8 @@ def main() -> None:
     p.add_argument("--B1", type=float, default=None)
     p.add_argument("--sigma-theta", type=float, default=0.25)
     p.add_argument("--sigma-phi", type=float, default=0.25)
+    p.add_argument("--optimizer", type=str, default="adam", choices=["adam", "lbfgs"])
+    p.add_argument("--lbfgs-tol", type=float, default=1e-9)
     p.add_argument("--n-steps", type=int, default=200)
     p.add_argument("--lr", type=float, default=1e-2)
     p.add_argument("--outdir", type=str, default="figures/optimize_helical_field")
@@ -116,7 +119,10 @@ def main() -> None:
     print(f"  surface: R0={args.R0} a={args.a} n_theta={args.n_theta} n_phi={args.n_phi}")
     print(f"  target:  nfp={args.nfp} B0={args.B0}T B1={args.B1}T n_points={args.n_points}")
     print(f"  sources: n_sources={args.n_sources} sigma_theta={sigma_theta} sigma_phi={sigma_phi}")
-    print(f"  optim:   n_steps={args.n_steps} lr={args.lr}")
+    if args.optimizer == "lbfgs":
+        print(f"  optim:   method=lbfgs maxiter={args.n_steps} tol={args.lbfgs_tol}")
+    else:
+        print(f"  optim:   method=adam n_steps={args.n_steps} lr={args.lr}")
 
     B_init = forward_B(
         surface,
@@ -129,20 +135,36 @@ def main() -> None:
     print(f"initial_rms={float(rms0):.6e} T")
 
     t0 = time.perf_counter()
-    best, history = optimize_sources(
-        surface,
-        init=init,
-        eval_points=points,
-        B_target=B_target,
-        B_scale=args.B0,
-        sigma_theta=sigma_theta,
-        sigma_phi=sigma_phi,
-        n_steps=args.n_steps,
-        lr=args.lr,
-        reg_currents=1e-12,
-        callback=cb,
-        return_history=True,
-    )
+    if args.optimizer == "lbfgs":
+        best, history = optimize_sources_lbfgs(
+            surface,
+            init=init,
+            eval_points=points,
+            B_target=B_target,
+            B_scale=args.B0,
+            sigma_theta=sigma_theta,
+            sigma_phi=sigma_phi,
+            maxiter=args.n_steps,
+            tol=args.lbfgs_tol,
+            reg_currents=1e-12,
+            callback=cb,
+            return_history=True,
+        )
+    else:
+        best, history = optimize_sources(
+            surface,
+            init=init,
+            eval_points=points,
+            B_target=B_target,
+            B_scale=args.B0,
+            sigma_theta=sigma_theta,
+            sigma_phi=sigma_phi,
+            n_steps=args.n_steps,
+            lr=args.lr,
+            reg_currents=1e-12,
+            callback=cb,
+            return_history=True,
+        )
     t1 = time.perf_counter()
 
     B_final = forward_B(

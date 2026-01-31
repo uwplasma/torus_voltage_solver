@@ -6,6 +6,7 @@ from typing import Callable, Dict, Tuple
 import jax
 import jax.numpy as jnp
 import optax
+from jaxopt import LBFGS
 
 from .biot_savart import biot_savart_surface
 from .poisson import solve_current_potential, surface_current_from_potential
@@ -176,6 +177,76 @@ def optimize_sources(
         if return_history:
             for name in history.keys():
                 history[name].append(float(aux[name]))
+
+    if return_history:
+        return params, history
+    return params
+
+
+def optimize_sources_lbfgs(
+    surface: TorusSurface,
+    *,
+    init: SourceParams,
+    eval_points: jnp.ndarray,
+    B_target: jnp.ndarray,
+    B_scale: float = 1.0,
+    sigma_theta: float,
+    sigma_phi: float,
+    maxiter: int,
+    tol: float = 1e-9,
+    reg_currents: float = 1e-6,
+    reg_positions: float = 0.0,
+    callback: Callable[[int, Dict[str, float]], None] | None = None,
+    return_history: bool = False,
+) -> SourceParams | tuple[SourceParams, Dict[str, list[float]]]:
+    """Optimize electrode params using L-BFGS (often faster than Adam for small problems)."""
+
+    def loss_fn(p: SourceParams) -> tuple[jnp.ndarray, Dict[str, jnp.ndarray]]:
+        B = forward_B(
+            surface,
+            p,
+            eval_points=eval_points,
+            sigma_theta=sigma_theta,
+            sigma_phi=sigma_phi,
+        )
+        err = (B - B_target) / B_scale
+        loss_B = jnp.mean(jnp.sum(err * err, axis=-1))
+        currents = enforce_net_zero(p.currents_raw)
+        currents_rms = jnp.sqrt(jnp.mean(currents * currents))
+        loss_reg = reg_currents * jnp.mean(currents * currents)
+        if reg_positions != 0.0:
+            loss_reg = loss_reg + reg_positions * (
+                jnp.mean(p.theta_src * p.theta_src) + jnp.mean(p.phi_src * p.phi_src)
+            )
+        loss = loss_B + loss_reg
+        aux = {"loss": loss, "loss_B": loss_B, "loss_reg": loss_reg, "currents_rms": currents_rms}
+        return loss, aux
+
+    solver = LBFGS(fun=loss_fn, has_aux=True, maxiter=int(maxiter), tol=float(tol), jit=True)
+    params = init
+    state = solver.init_state(params)
+
+    history: Dict[str, list[float]] = {"loss": [], "loss_B": [], "loss_reg": [], "currents_rms": []}
+    for k in range(int(maxiter)):
+        params, state = solver.update(params, state)
+        aux = state.aux
+
+        if callback is not None:
+            callback(
+                k,
+                {
+                    "loss": float(aux["loss"]),
+                    "loss_B": float(aux["loss_B"]),
+                    "loss_reg": float(aux["loss_reg"]),
+                    "currents_rms": float(aux["currents_rms"]),
+                },
+            )
+        if return_history:
+            for name in history.keys():
+                history[name].append(float(aux[name]))
+
+        if float(state.error) <= float(tol):
+            break
 
     if return_history:
         return params, history

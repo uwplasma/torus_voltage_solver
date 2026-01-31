@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 
@@ -17,8 +17,9 @@ from .fields import ideal_toroidal_field
 from .optimize import SourceParams
 from .poisson import solve_current_potential, surface_current_from_potential
 from .sources import deposit_current_sources
+from .targets import vmec_target_surface
 from .torus import TorusSurface, make_torus_surface
-from .vmec import read_vmec_boundary, vmec_boundary_RZ_and_derivatives
+from .vmec import read_vmec_boundary
 
 
 try:
@@ -32,6 +33,13 @@ except Exception as e:  # pragma: no cover
 
 ScalarName = Literal["|K|", "V", "s", "K_theta", "K_phi"]
 CutScalarName = Literal["|K|", "V", "K_theta", "K_phi"]
+
+# Avoid hard runtime dependence on VTK in type hints (important for docs builds).
+VtkPolyData = Any
+VtkActor = Any
+if vtk is not None:  # pragma: no cover
+    VtkPolyData = vtk.vtkPolyData
+    VtkActor = vtk.vtkActor
 
 
 @dataclass(frozen=True)
@@ -101,13 +109,13 @@ class CutGUIConfig:
 class VmecOptGUIConfig:
     # VMEC target surface (boundary) inside the circular torus.
     vmec_input: str = "input.QA_nfp2"
-    surf_n_theta: int = 16
-    surf_n_phi: int = 28
-    fit_margin: float = 0.92
+    surf_n_theta: int = 32
+    surf_n_phi: int = 56
+    fit_margin: float = 0.7
 
     # Winding surface (circular torus).
     R0: float = 1.0
-    a: float = 0.5
+    a: float = 0.3
     n_theta: int = 32
     n_phi: int = 32
 
@@ -224,7 +232,7 @@ def _cut_phase_theta_np(*, theta: np.ndarray, R0: float, a: float, theta_cut: fl
     return np.roll(f_roll, k0)
 
 
-def _build_torus_polydata(xyz: np.ndarray) -> "vtk.vtkPolyData":  # pragma: no cover
+def _build_torus_polydata(xyz: np.ndarray) -> VtkPolyData:  # pragma: no cover
     _require_vtk()
     n_theta, n_phi, _ = xyz.shape
     pts = xyz.reshape((-1, 3))
@@ -253,7 +261,7 @@ def _build_torus_polydata(xyz: np.ndarray) -> "vtk.vtkPolyData":  # pragma: no c
     return poly
 
 
-def _build_fieldlines_polydata(n_lines: int, n_pts: int) -> "vtk.vtkPolyData":  # pragma: no cover
+def _build_fieldlines_polydata(n_lines: int, n_pts: int) -> VtkPolyData:  # pragma: no cover
     _require_vtk()
     poly = vtk.vtkPolyData()
     points = vtk.vtkPoints()
@@ -1061,7 +1069,7 @@ class TorusCutVoltageGUI:  # pragma: no cover
         cut_theta = float(cfg.theta_cut) % (2 * np.pi)
         cut = torus_xyz(cfg.R0, cfg.a, cut_theta * np.ones_like(cut_phi), cut_phi)
 
-        def _polyline_actor(points_xyz: np.ndarray, *, rgb: tuple[float, float, float], width: float) -> "vtk.vtkActor":
+        def _polyline_actor(points_xyz: np.ndarray, *, rgb: tuple[float, float, float], width: float) -> VtkActor:
             poly = vtk.vtkPolyData()
             pts = vtk.vtkPoints()
             pts.SetData(numpy_to_vtk(points_xyz, deep=True))
@@ -1695,7 +1703,7 @@ def run_torus_cut_voltage_gui(
 
 
 class TorusVmecBnOptimizeGUI:  # pragma: no cover
-    """VTK GUI: optimize electrode sources/sinks to reduce B·n on a target VMEC surface."""
+    """VTK GUI: optimize electrode sources/sinks to reduce (B·n)/norm(B) on a target VMEC surface."""
 
     def __init__(self, cfg: VmecOptGUIConfig):
         _require_vtk()
@@ -1764,7 +1772,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         self._cache: dict[str, np.ndarray] = {}
         self._traj_cache: np.ndarray | None = None
         self._Iproj_cache: np.ndarray | None = None
-        self._target_Bn_cache: np.ndarray | None = None
+        self._target_Bn_over_B_cache: np.ndarray | None = None
         self._metrics_cache: dict[str, float] = {}
 
         # Text entry ("textbox") state.
@@ -1806,48 +1814,27 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         print("VMEC target surface:")
         print(f"  file={vmec_path}  NFP={boundary.nfp}  nmodes={boundary.m.size}")
 
-        theta_s = jnp.linspace(0.0, 2 * jnp.pi, int(cfg.surf_n_theta), endpoint=False, dtype=jnp.float64)
-        phi_s = jnp.linspace(0.0, 2 * jnp.pi, int(cfg.surf_n_phi), endpoint=False, dtype=jnp.float64)
-        R, Z, R_th, R_ph, Z_th, Z_ph = vmec_boundary_RZ_and_derivatives(boundary, theta=theta_s, phi=phi_s)
-
-        # Shift and scale to fit inside the circular torus.
-        R_mean = jnp.mean(R)
-        shift = float(cfg.R0 - float(R_mean))
-        R_shift = R + shift
-        dR = R_shift - cfg.R0
-        rho = jnp.sqrt(dR * dR + Z * Z + 1e-30)
-        rho_max = float(jnp.max(rho))
-        target = float(cfg.fit_margin * cfg.a)
-        scale = 1.0
-        if rho_max > target:
-            scale = target / rho_max
-
-        R_fit = cfg.R0 + scale * dR
-        Z_fit = scale * Z
-        R_th_fit = scale * R_th
-        R_ph_fit = scale * R_ph
-        Z_th_fit = scale * Z_th
-        Z_ph_fit = scale * Z_ph
+        target = vmec_target_surface(
+            boundary,
+            torus_R0=float(cfg.R0),
+            torus_a=float(cfg.a),
+            fit_margin=float(cfg.fit_margin),
+            n_theta=int(cfg.surf_n_theta),
+            n_phi=int(cfg.surf_n_phi),
+            dtype=jnp.float64,
+        )
 
         print("  fit into circular torus:")
         print(f"    torus: R0={cfg.R0} a={cfg.a} fit_margin={cfg.fit_margin}")
-        print(f"    shift_R={shift:+.6e} m  scale={scale:.6e}  rho_max(before)={rho_max:.6e} m")
+        print(
+            "    shift_R={:+.6e} m  scale={:.6e}  rho_max(before)={:.6e} m".format(
+                float(target.fit.shift_R), float(target.fit.scale_rho), float(target.fit.rho_max_before_m)
+            )
+        )
 
-        phi2 = phi_s[None, :]
-        c = jnp.cos(phi2)
-        s = jnp.sin(phi2)
-
-        x = R_fit * c
-        y = R_fit * s
-        z = Z_fit
-        xyz = jnp.stack([x, y, z], axis=-1)  # (Nθ,Nφ,3)
-
-        r_theta = jnp.stack([R_th_fit * c, R_th_fit * s, Z_th_fit], axis=-1)
-        r_phi = jnp.stack([R_ph_fit * c - R_fit * s, R_ph_fit * s + R_fit * c, Z_ph_fit], axis=-1)
-        n_vec = jnp.cross(r_theta, r_phi)
-        n_norm = jnp.linalg.norm(n_vec, axis=-1)
-        n_hat = n_vec / (n_norm[..., None] + 1e-30)
-        w_area = n_norm
+        xyz = target.xyz
+        n_hat = target.normals
+        w_area = target.weights
 
         xyz_grid_np = np.asarray(xyz, dtype=float)
         points = xyz.reshape((-1, 3))
@@ -1907,15 +1894,17 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         B_bg = ideal_toroidal_field(self._target_points, B0=B0, R0=self.cfg.R0)
         B_tot = B_bg + B_shell
         Bn = jnp.sum(B_tot * self._target_normals, axis=-1)
+        Bmag = jnp.linalg.norm(B_tot, axis=-1)
+        Bn_over_B = Bn / (Bmag + 1e-30)
 
         w = self._target_weights
         wsum = jnp.sum(w)
-        B_scale = jnp.where(B0 != 0.0, jnp.abs(B0), 1.0)
-        loss_bn = jnp.sum(w * (Bn / B_scale) ** 2) / (wsum + 1e-30)
+        loss_bn = jnp.sum(w * (Bn_over_B * Bn_over_B)) / (wsum + 1e-30)
         loss_reg = reg_currents * jnp.mean(Iraw * Iraw)
         loss = loss_bn + loss_reg
 
-        Bn_rms = jnp.sqrt(jnp.sum(w * (Bn * Bn)) / (wsum + 1e-30))
+        Bn_over_B_rms = jnp.sqrt(loss_bn)
+        Bn_over_B_max = jnp.max(jnp.abs(Bn_over_B))
         I_rms = jnp.sqrt(jnp.mean(I * I))
 
         def B_fn(xyz: jnp.ndarray) -> jnp.ndarray:
@@ -1940,7 +1929,22 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
 
         traj = jax.lax.cond(compute_traj, do_trace, no_trace, operand=None)
 
-        return V, s, Kmag, Ktheta, Kphi, Bn, loss, loss_bn, loss_reg, Bn_rms, I_rms, traj, I
+        return (
+            V,
+            s,
+            Kmag,
+            Ktheta,
+            Kphi,
+            Bn_over_B,
+            loss,
+            loss_bn,
+            loss_reg,
+            Bn_over_B_rms,
+            Bn_over_B_max,
+            I_rms,
+            traj,
+            I,
+        )
 
     def _loss_fn(
         self,
@@ -1952,7 +1956,22 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         sigma_s: jnp.ndarray,
         reg_currents: jnp.ndarray,
     ):
-        _V, _s, _Kmag, _Ktheta, _Kphi, _Bn, loss, loss_bn, loss_reg, Bn_rms, I_rms, _traj, _Iproj = (
+        (
+            _V,
+            _s,
+            _Kmag,
+            _Ktheta,
+            _Kphi,
+            _Bn_over_B,
+            loss,
+            loss_bn,
+            loss_reg,
+            Bn_over_B_rms,
+            Bn_over_B_max,
+            I_rms,
+            _traj,
+            _Iproj,
+        ) = (
             self._compute_state(
                 params.theta_src,
                 params.phi_src,
@@ -1969,7 +1988,8 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
             "loss": loss,
             "loss_bn": loss_bn,
             "loss_reg": loss_reg,
-            "Bn_rms_T": Bn_rms,
+            "Bn_over_B_rms": Bn_over_B_rms,
+            "Bn_over_B_max": Bn_over_B_max,
             "I_rms_A": I_rms,
         }
         return loss, aux
@@ -2051,11 +2071,11 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         self.torus_actor.GetProperty().SetSpecularPower(30.0)
         self.renderer.AddActor(self.torus_actor)
 
-        # Target VMEC surface actor (colored by B·n).
+        # Target VMEC surface actor (colored by (B·n)/|B|).
         self.target_poly = _build_torus_polydata(self._target_xyz_grid)
         self.target_scalars_np = np.zeros((cfg.surf_n_theta * cfg.surf_n_phi,), dtype=np.float32)
         self.target_scalars_vtk = numpy_to_vtk(self.target_scalars_np, deep=False)
-        self.target_scalars_vtk.SetName("Bn")
+        self.target_scalars_vtk.SetName("Bn_over_B")
         self.target_poly.GetPointData().SetScalars(self.target_scalars_vtk)
 
         self.target_mapper = vtk.vtkPolyDataMapper()
@@ -2193,8 +2213,8 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
 
     def _help_text(self) -> str:
         return (
-            "VMEC B·n optimization GUI (VTK)\n"
-            "Goal: drive target-surface B·n -> 0 by moving/setting electrode sources/sinks\n"
+            "VMEC (B·n)/|B| optimization GUI (VTK)\n"
+            "Goal: drive target-surface (B·n)/|B| -> 0 by moving/setting electrode sources/sinks\n"
             "Mouse: rotate/zoom as usual\n"
             "Click electrode: select\n"
             "Keys:\n"
@@ -2239,7 +2259,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         if m:
             metric_lines = (
                 f"loss={m.get('loss', np.nan):.3e}  bn={m.get('loss_bn', np.nan):.3e}  reg={m.get('loss_reg', np.nan):.3e}\n"
-                f"Bn_rms={m.get('Bn_rms_T', np.nan):.3e} T  I_rms={m.get('I_rms_A', np.nan):.3e} A\n"
+                f"rms(Bn/B)={m.get('Bn_over_B_rms', np.nan):.3e}  max|Bn/B|={m.get('Bn_over_B_max', np.nan):.3e}  I_rms={m.get('I_rms_A', np.nan):.3e} A\n"
             )
 
         auto_txt = "auto" if self.auto_current_scale else "manual"
@@ -2247,7 +2267,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
             f"Active electrodes: {n_active}/{self.N}   optimize_positions={self.optimize_positions}\n"
             f"Selected: {sel_txt}\n"
             f"Mode: {self.mode}\n"
-            f"Torus scalar: {self.scalar_name}   Target scalar: B·n\n"
+            f"Torus scalar: {self.scalar_name}   Target scalar: (B·n)/|B|\n"
             f"B0={self.B0:.6g} T   current_scale={self.current_scale:.3e} A/unit ({auto_txt})\n"
             f"lr={self.lr:.3e}   steps_per_opt={self.steps_per_opt}   reg_currents={self.reg_currents:.3e}   sigma_s={self.sigma_s:.3e}\n"
             + metric_lines
@@ -2296,9 +2316,9 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         self.torus_mapper.SetScalarRange(smin, smax)
 
     def _apply_target_scalar(self) -> None:
-        if self._target_Bn_cache is None:
+        if self._target_Bn_over_B_cache is None:
             return
-        scal = self._target_Bn_cache.reshape((-1,))
+        scal = self._target_Bn_over_B_cache.reshape((-1,))
         self.target_scalars_np[:] = scal.astype(np.float32, copy=False)
         self.target_scalars_vtk.Modified()
         self.target_poly.Modified()
@@ -2357,11 +2377,12 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
             Kmag,
             Ktheta,
             Kphi,
-            Bn,
+            Bn_over_B,
             loss,
             loss_bn,
             loss_reg,
-            Bn_rms,
+            Bn_over_B_rms,
+            Bn_over_B_max,
             I_rms,
             traj,
             Iproj,
@@ -2388,12 +2409,13 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         }
         self._traj_cache = np.asarray(traj, dtype=np.float32)
         self._Iproj_cache = np.asarray(Iproj, dtype=float)
-        self._target_Bn_cache = np.asarray(Bn, dtype=np.float32)
+        self._target_Bn_over_B_cache = np.asarray(Bn_over_B, dtype=np.float32)
         self._metrics_cache = {
             "loss": float(loss),
             "loss_bn": float(loss_bn),
             "loss_reg": float(loss_reg),
-            "Bn_rms_T": float(Bn_rms),
+            "Bn_over_B_rms": float(Bn_over_B_rms),
+            "Bn_over_B_max": float(Bn_over_B_max),
             "I_rms_A": float(I_rms),
         }
 
@@ -2585,10 +2607,11 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
 
         if aux_last is not None:
             print(
-                "optimize: steps={}  loss={:.3e}  Bn_rms={:.3e}T  I_rms={:.3e}A  wall={:.3f}s".format(
+                "optimize: steps={}  loss={:.3e}  rms(Bn/B)={:.3e}  max|Bn/B|={:.3e}  I_rms={:.3e}A  wall={:.3f}s".format(
                     int(n_steps),
                     float(aux_last["loss"]),
-                    float(aux_last["Bn_rms_T"]),
+                    float(aux_last["Bn_over_B_rms"]),
+                    float(aux_last["Bn_over_B_max"]),
                     float(aux_last["I_rms_A"]),
                     t1 - t0,
                 )
@@ -2725,7 +2748,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         print(f"Saved screenshot: {path}")
 
     def run(self) -> None:
-        print("Starting VMEC B·n optimization GUI. Close the window to exit.")
+        print("Starting VMEC (B·n)/|B| optimization GUI. Close the window to exit.")
         self._update_text()
         self.window.Render()
         self.interactor.Initialize()
@@ -2734,7 +2757,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
 
 def run_torus_vmec_optimize_gui(*, cfg: VmecOptGUIConfig = VmecOptGUIConfig()) -> None:  # pragma: no cover
     _require_vtk()
-    print("Interactive torus VMEC B·n optimization GUI")
+    print("Interactive torus VMEC (B·n)/|B| optimization GUI")
     print(f"  R0={cfg.R0} a={cfg.a} n_theta={cfg.n_theta} n_phi={cfg.n_phi}")
     print(f"  target: vmec_input={cfg.vmec_input} surf_n_theta={cfg.surf_n_theta} surf_n_phi={cfg.surf_n_phi}")
     print(f"  B0={cfg.B0}T  sigma_theta={cfg.sigma_theta} sigma_phi={cfg.sigma_phi} sigma_s={cfg.sigma_s}")

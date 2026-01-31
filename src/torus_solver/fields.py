@@ -31,10 +31,11 @@ def toroidal_poloidal_coords(
 
     The local poloidal coordinates are defined in the (R,Z) plane relative to the
     circle R=R0, Z=0:
-      ρ = sqrt((R-R0)^2 + Z^2)
-      θ = atan2(Z, R-R0)
-      e_ρ = cosθ e_R + sinθ e_Z
-      e_θ = -sinθ e_R + cosθ e_Z
+
+    - ρ = sqrt((R-R0)^2 + Z^2)
+    - θ = atan2(Z, R-R0)
+    - e_ρ = cos(θ) e_R + sin(θ) e_Z
+    - e_θ = -sin(θ) e_R + cos(θ) e_Z
     """
     R, phi, Z = cylindrical_coords(xyz)
     e_R, _, e_Z = cylindrical_unit_vectors(phi)
@@ -72,4 +73,3 @@ def tokamak_like_field(
     _, e_phi, _ = cylindrical_unit_vectors(phi)
     scale = R0 / (R + eps)
     return (B_tor0 * scale)[..., None] * e_phi + (B_pol0 * scale)[..., None] * e_theta
-

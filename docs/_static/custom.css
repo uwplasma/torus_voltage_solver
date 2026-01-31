@@ -1,0 +1,12 @@
+/* Keep the theme mostly default; only small quality-of-life tweaks. */
+
+/* Slightly tighter code blocks for scientific notebooks-like reading. */
+pre {
+  line-height: 1.25;
+}
+
+/* Make inline code a bit clearer. */
+code.literal {
+  border-radius: 4px;
+}
+

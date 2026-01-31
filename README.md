@@ -18,6 +18,9 @@ This project uses a standard `src/` layout:
 torus_solver/
   pyproject.toml
   README.md
+  docs/                      # Read the Docs / Sphinx documentation
+  .readthedocs.yaml          # RTD build config
+  .github/workflows/         # CI + PyPI publish workflows
   src/torus_solver/          # the installable package (only library code)
   tests/                     # pytest suite (validations + regressions)
   examples/                  # runnable scripts with lots of debug printing
@@ -32,6 +35,7 @@ From `torus_solver/`:
 pytest
 python examples/trace_fieldlines_tokamak.py
 python examples/optimize_helical_field.py --n-steps 50
+python examples/scan_vmec_surface_regularization.py --vmec-input examples/input.QA_nfp2
 ```
 
 ## Install (editable)
@@ -298,6 +302,11 @@ From `torus_solver/`:
   python examples/optimize_vmec_surface_Bn.py --vmec-input examples/input.QA_nfp2
   ```
 
+- REGCOIL-style regularization scan (tradeoff / “L-curve”):
+  ```bash
+  python examples/scan_vmec_surface_regularization.py --vmec-input examples/input.QA_nfp2
+  ```
+
 - VMEC-surface normal-field minimization GUI (interactive 3D, with optimization hotkeys):
   ```bash
   python examples/gui_optimize_vmec_surface_Bn.py --vmec-input examples/input.QA_nfp2
@@ -320,6 +329,17 @@ From `torus_solver/`:
 ```bash
 python benchmarks/bench_forward_and_grad.py
 python benchmarks/bench_fieldline.py
+```
+
+## Documentation
+
+Docs are written for Read the Docs in `docs/` (Sphinx + MyST Markdown).
+
+Build locally:
+
+```bash
+pip install -e '.[docs]'
+python -m sphinx -b html docs docs/_build/html -W
 ```
 
 ## Roadmap / next steps

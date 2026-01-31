@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Interactive GUI: optimize electrode sources/sinks to reduce B·n on a VMEC surface.
+"""Interactive GUI: optimize electrode sources/sinks to reduce (B·n)/|B| on a VMEC surface.
 
 Run (from `torus_solver/`):
   python examples/gui_optimize_vmec_surface_Bn.py --vmec-input examples/input.QA_nfp2
@@ -21,13 +21,13 @@ def main() -> None:
     p.add_argument("--vmec-input", type=str, default="input.QA_nfp2")
 
     p.add_argument("--R0", type=float, default=1.0)
-    p.add_argument("--a", type=float, default=0.5)
+    p.add_argument("--a", type=float, default=0.3)
     p.add_argument("--n-theta", type=int, default=32)
     p.add_argument("--n-phi", type=int, default=32)
 
-    p.add_argument("--surf-n-theta", type=int, default=16)
-    p.add_argument("--surf-n-phi", type=int, default=28)
-    p.add_argument("--fit-margin", type=float, default=0.92)
+    p.add_argument("--surf-n-theta", type=int, default=32)
+    p.add_argument("--surf-n-phi", type=int, default=56)
+    p.add_argument("--fit-margin", type=float, default=0.7)
 
     p.add_argument("--B0", type=float, default=1.0)
     p.add_argument("--sigma-theta", type=float, default=0.25)
