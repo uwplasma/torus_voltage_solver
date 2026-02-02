@@ -157,6 +157,12 @@ def main() -> None:
     p.add_argument("--fieldline-steps", type=int, default=500)
     p.add_argument("--fieldline-ds", type=float, default=0.03)
     p.add_argument("--biot-savart-eps", type=float, default=1e-8)
+    p.add_argument(
+        "--Bext0",
+        type=float,
+        default=0.0,
+        help="Optional external ideal toroidal background field at R=R0 [T] (0 disables).",
+    )
 
     args = p.parse_args()
 
@@ -272,6 +278,7 @@ def main() -> None:
         print("Tracing field lines for final solution (Biot–Savart)...")
         from torus_solver.biot_savart import biot_savart_surface
         from torus_solver.fieldline import trace_field_lines_batch
+        from torus_solver.fields import ideal_toroidal_field
 
         theta_seed = jnp.linspace(0.0, 2 * jnp.pi, int(args.n_fieldlines), endpoint=False)
         rho = 0.5 * surface.a
@@ -280,7 +287,10 @@ def main() -> None:
         seeds = jnp.stack([R_seed, jnp.zeros_like(R_seed), Z_seed], axis=-1)
 
         def B_fn(xyz: jnp.ndarray) -> jnp.ndarray:
-            return biot_savart_surface(surface, K1, xyz, eps=float(args.biot_savart_eps))
+            B = biot_savart_surface(surface, K1, xyz, eps=float(args.biot_savart_eps))
+            if float(args.Bext0) != 0.0:
+                B = B + ideal_toroidal_field(xyz, B0=float(args.Bext0), R0=float(surface.R0))
+            return B
 
         traj = jax.jit(
             lambda x0: trace_field_lines_batch(

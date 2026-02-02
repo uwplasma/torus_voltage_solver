@@ -65,6 +65,10 @@ class GUIConfig:
     n_fieldlines: int = 12
     fieldline_steps: int = 500
     fieldline_step_size_m: float = 0.03
+    # Optional background field for field-line tracing / visualization:
+    # ideal toroidal B ~ 1/R with magnitude Bext0 at R=R0.
+    Bext0: float = 1e-4  # Tesla at R=R0 (0 disables)
+    bg_field_default_on: bool = False
 
     # Rendering
     surface_opacity: float = 0.35
@@ -99,6 +103,10 @@ class CutGUIConfig:
     n_fieldlines: int = 12
     fieldline_steps: int = 500
     fieldline_step_size_m: float = 0.03
+    # Optional background field for field-line tracing / visualization:
+    # ideal toroidal B ~ 1/R with magnitude Bext0 at R=R0.
+    Bext0: float = 1e-4  # Tesla at R=R0 (0 disables)
+    bg_field_default_on: bool = False
 
     # Rendering
     surface_opacity: float = 0.35
@@ -121,6 +129,8 @@ class VmecOptGUIConfig:
 
     # Background field (ideal toroidal 1/R).
     B0: float = 1.0  # Tesla at R=R0
+    # For diagnostics: allow tracing field lines with/without the background field.
+    trace_include_bg_default_on: bool = True
 
     # Electrodes (fixed size arrays for interactivity).
     n_electrodes_max: int = 64
@@ -329,6 +339,7 @@ class TorusElectrodeGUI:  # pragma: no cover
 
         self.scalar_name: ScalarName = "|K|"
         self.show_fieldlines = True
+        self.include_bg_field = bool(self.cfg.bg_field_default_on and float(self.cfg.Bext0) != 0.0)
 
         # Cached computed state (numpy) so we can update visualization (e.g. scalar choice)
         # without re-running the JAX solve.
@@ -520,6 +531,7 @@ class TorusElectrodeGUI:  # pragma: no cover
             "  tab: cycle selected\n"
             "  c: cycle surface scalar (|K|, V, s, Kθ, Kφ)\n"
             "  f: toggle field lines\n"
+            "  b: toggle external toroidal field (ideal 1/R)\n"
             "  r: recompute\n"
             "  e: export ParaView (.vtu/.vtm)\n"
             "  i (or v): type selected I\n"
@@ -547,6 +559,8 @@ class TorusElectrodeGUI:  # pragma: no cover
             f"Selected: {sel_txt}\n"
             f"Mode: {self.mode}\n"
             f"Scalar: {self.scalar_name}\n"
+            f"external Bphi~1/R: {'ON' if self.include_bg_field else 'OFF'}  "
+            f"(Bext0={float(self.cfg.Bext0):.3g} T at R0={self.cfg.R0:g} m)\n"
             f"sigma_theta={self.cfg.sigma_theta:.3f}  sigma_phi={self.cfg.sigma_phi:.3f}\n"
             f"fieldlines: {self.cfg.n_fieldlines}  steps: {self.cfg.fieldline_steps}  ds: {self.cfg.fieldline_step_size_m}\n"
         )
@@ -638,6 +652,7 @@ class TorusElectrodeGUI:  # pragma: no cover
         phi_src: jnp.ndarray,
         currents_raw: jnp.ndarray,
         active: jnp.ndarray,
+        include_bg_field: jnp.ndarray,
         compute_traj: jnp.ndarray,
     ):
         # Project currents to net-zero over active electrodes.
@@ -665,9 +680,12 @@ class TorusElectrodeGUI:  # pragma: no cover
         Kphi = jnp.sum(K * self._e_phi, axis=-1)
 
         def B_fn(xyz: jnp.ndarray) -> jnp.ndarray:
-            from .biot_savart import biot_savart_surface
-
-            return biot_savart_surface(self.surface, K, xyz, eps=self.cfg.biot_savart_eps)
+            B = biot_savart_surface(self.surface, K, xyz, eps=self.cfg.biot_savart_eps)
+            if float(self.cfg.Bext0) != 0.0:
+                B = B + jnp.asarray(include_bg_field, dtype=B.dtype) * ideal_toroidal_field(
+                    xyz, B0=float(self.cfg.Bext0), R0=float(self.cfg.R0)
+                )
+            return B
 
         n_steps = self.cfg.fieldline_steps
         n_lines = self.cfg.n_fieldlines
@@ -699,7 +717,12 @@ class TorusElectrodeGUI:  # pragma: no cover
         act = jnp.asarray(self.active)
 
         V, s, Kmag, Ktheta, Kphi, traj, Iproj = self._compute_jit(
-            th, ph, Iraw, act, jnp.asarray(self.show_fieldlines)
+            th,
+            ph,
+            Iraw,
+            act,
+            jnp.asarray(self.include_bg_field),
+            jnp.asarray(self.show_fieldlines),
         )
         V.block_until_ready()
         t1 = time.perf_counter()
@@ -841,6 +864,15 @@ class TorusElectrodeGUI:  # pragma: no cover
                 self.update_solution()
                 return
             self.field_actor.SetVisibility(False)
+        elif key_sym in ("b", "B"):
+            self.include_bg_field = not self.include_bg_field
+            print(
+                f"External toroidal field (1/R): {'ON' if self.include_bg_field else 'OFF'} "
+                f"(Bext0={float(self.cfg.Bext0):.3g} T at R0={self.cfg.R0:g} m)"
+            )
+            if self.show_fieldlines:
+                self.update_solution()
+                return
         elif key_sym in ("r", "R"):
             self.update_solution()
             return
@@ -1054,6 +1086,7 @@ class TorusCutVoltageGUI:  # pragma: no cover
 
         self.scalar_name: ScalarName = "|K|"
         self.show_fieldlines = True
+        self.include_bg_field = bool(self.cfg.bg_field_default_on and float(self.cfg.Bext0) != 0.0)
         self.V_cut = float(cfg.V_cut_default)
 
         # Cached computed state (numpy) so we can update visualization without recomputing.
@@ -1304,6 +1337,7 @@ class TorusCutVoltageGUI:  # pragma: no cover
             "  d: delete selected    tab: cycle selected\n"
             "  c: cycle scalar (|K|, V, s, Kθ, Kφ)\n"
             "  f: toggle field lines    r: recompute\n"
+            "  b: toggle external toroidal field (ideal 1/R)\n"
             "  v: type V_cut    i: type selected I\n"
             "  e: export ParaView (.vtu/.vtm)\n"
             "  s: save screenshot\n"
@@ -1327,6 +1361,8 @@ class TorusCutVoltageGUI:  # pragma: no cover
             f"V_cut={self.V_cut:+.3f}  theta_cut={float(self.cfg.theta_cut)%(2*np.pi):.3f}  sigma_s={self.cfg.sigma_s:.3f}\n"
             f"Active electrodes: {n_active}/{self.N}   Selected: {sel_txt}   Mode: {self.mode}\n"
             f"Scalar: {self.scalar_name}\n"
+            f"external Bphi~1/R: {'ON' if self.include_bg_field else 'OFF'}  "
+            f"(Bext0={float(self.cfg.Bext0):.3g} T at R0={self.cfg.R0:g} m)\n"
             f"sigma_theta={self.cfg.sigma_theta:.3f}  sigma_phi={self.cfg.sigma_phi:.3f}\n"
             f"fieldlines: {self.cfg.n_fieldlines}  steps: {self.cfg.fieldline_steps}  ds: {self.cfg.fieldline_step_size_m}\n"
         )
@@ -1357,6 +1393,7 @@ class TorusCutVoltageGUI:  # pragma: no cover
         currents_raw: jnp.ndarray,
         active: jnp.ndarray,
         V_cut: jnp.ndarray,
+        include_bg_field: jnp.ndarray,
         compute_traj: jnp.ndarray,
     ):
         # Project currents to net-zero over active electrodes.
@@ -1396,9 +1433,12 @@ class TorusCutVoltageGUI:  # pragma: no cover
         V_vis = V_e + V_cut * self._f_theta[:, None]
 
         def B_fn(xyz: jnp.ndarray) -> jnp.ndarray:
-            from .biot_savart import biot_savart_surface
-
-            return biot_savart_surface(self.surface, K, xyz, eps=self.cfg.biot_savart_eps)
+            B = biot_savart_surface(self.surface, K, xyz, eps=self.cfg.biot_savart_eps)
+            if float(self.cfg.Bext0) != 0.0:
+                B = B + jnp.asarray(include_bg_field, dtype=B.dtype) * ideal_toroidal_field(
+                    xyz, B0=float(self.cfg.Bext0), R0=float(self.cfg.R0)
+                )
+            return B
 
         n_steps = self.cfg.fieldline_steps
         n_lines = self.cfg.n_fieldlines
