@@ -19,10 +19,10 @@ The ParaView entry point is usually a single file:
 
 ParaView output is enabled by default; pass `--no-paraview` to disable.
 
-Several examples and GUIs also support optionally *adding* an external ideal toroidal field
-$B_\phi \propto 1/R$ (for field-line tracing / visualization) via:
+Several examples and GUIs also support optionally *adding* an external background field
+that decays like $1/R$ (for field-line tracing / visualization), via:
 
-- CLI flags like `--Bext0 <Tesla>` (non-GUI scripts), or
+- CLI flags like `--Bext0 <Tesla>` (toroidal) and `--Bpol0 <Tesla>` (poloidal) in non-GUI scripts, or
 - GUI hotkeys (see each GUI page).
 
 ### GUIs (VTK) exports

@@ -25,8 +25,11 @@ python examples/2_intermediate/optimize_helical_axis_field.py --n-steps 200
 
 Optional background field (for *field-line tracing only*):
 
-- `--Bext0 <Tesla>` adds an external ideal toroidal field $B_\phi \propto 1/R$ to the traced field lines
-  (and the corresponding ParaView `fieldlines_final.vtu`). Use `--Bext0 0` to disable.
+- `--Bext0 <Tesla>` adds an external ideal toroidal field $B_\phi = B_{\mathrm{ext0}} (R_0/R)$ to the traced field lines.
+- `--Bpol0 <Tesla>` adds an external tokamak-like poloidal component
+  $B_\\theta = B_{\\mathrm{pol0}} (R_0/R)$ to the traced field lines.
+
+Use `--Bext0 0 --Bpol0 0` to disable.
 
 Outputs include:
 
@@ -55,7 +58,9 @@ Key points:
 
 - red electrodes are **sources** (+I), blue are **sinks** (−I)
 - press `E` to export the current state to `paraview/gui_torus_electrodes_<timestamp>/scene.vtm`
-- press `B` to toggle adding an external ideal toroidal field ($B_\phi\propto 1/R$) to the traced field lines
+- press `B` to toggle adding an external toroidal field ($B_\phi\\propto 1/R$) to the traced field lines
+- press `P` to toggle adding an external poloidal field ($B_\\theta\\propto 1/R$) to the traced field lines
+- press `[`/`]` to decrease/increase `Bext0`, and `,`/`.` to decrease/increase `Bpol0`
 
 ## GUI demos
 

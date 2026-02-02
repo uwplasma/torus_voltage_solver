@@ -80,7 +80,13 @@ def main() -> None:
         "--Bext0",
         type=float,
         default=0.0,
-        help="Optional external ideal toroidal background field at R=R0 [T] (0 disables).",
+        help="Optional external toroidal background field at R=R0 [T] (ideal 1/R; 0 disables).",
+    )
+    p.add_argument(
+        "--Bpol0",
+        type=float,
+        default=0.0,
+        help="Optional external poloidal background field at R=R0 [T] (tokamak-like 1/R; 0 disables).",
     )
     args = p.parse_args()
 
@@ -139,8 +145,11 @@ def main() -> None:
         print(f"  optim:   method=lbfgs maxiter={args.n_steps} tol={args.lbfgs_tol}")
     else:
         print(f"  optim:   method=adam n_steps={args.n_steps} lr={args.lr}")
-    if float(args.Bext0) != 0.0:
-        print(f"  fieldlines: include external ideal toroidal field Bext0={args.Bext0} T at R=R0")
+    if float(args.Bext0) != 0.0 or float(args.Bpol0) != 0.0:
+        print(
+            "  fieldlines: include external background field at R=R0: "
+            f"Bext0={args.Bext0} T, Bpol0={args.Bpol0} T"
+        )
 
     B_init = forward_B(
         surface,
@@ -216,7 +225,7 @@ def main() -> None:
         print("Tracing field lines for final solution (Biot–Savart)...")
         from torus_solver.biot_savart import biot_savart_surface
         from torus_solver.fieldline import trace_field_lines_batch
-        from torus_solver.fields import ideal_toroidal_field
+        from torus_solver.fields import tokamak_like_field
 
         theta_seed = jnp.linspace(0.0, 2 * jnp.pi, args.n_fieldlines, endpoint=False)
         rho = 0.5 * surface.a
@@ -226,8 +235,10 @@ def main() -> None:
 
         def B_fn(xyz: jnp.ndarray) -> jnp.ndarray:
             B = biot_savart_surface(surface, K1, xyz, eps=float(args.biot_savart_eps))
-            if float(args.Bext0) != 0.0:
-                B = B + ideal_toroidal_field(xyz, B0=float(args.Bext0), R0=float(surface.R0))
+            if float(args.Bext0) != 0.0 or float(args.Bpol0) != 0.0:
+                B = B + tokamak_like_field(
+                    xyz, B_tor0=float(args.Bext0), B_pol0=float(args.Bpol0), R0=float(surface.R0)
+                )
             return B
 
         traj = jax.jit(

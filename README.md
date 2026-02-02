@@ -288,6 +288,10 @@ From the repo root (`torus_voltage_solver/`):
     - `tab`: cycle selected electrode
     - `c`: cycle surface scalar (`|K|`, `V`, `s`, `Kθ`, `Kφ`)
     - `f`: toggle field lines
+    - `b`: toggle external toroidal background field ($B_\\phi\\propto 1/R$) in field-line tracing
+    - `p`: toggle external poloidal background field ($B_\\theta\\propto 1/R$) in field-line tracing
+    - `[` / `]`: decrease/increase `Bext0` (toroidal background amplitude)
+    - `,` / `.`: decrease/increase `Bpol0` (poloidal background amplitude)
     - `r`: recompute
     - `i` / `v`: type the selected electrode current
     - `E`: export ParaView scene to `paraview/gui_torus_electrodes_<timestamp>/scene.vtm`
@@ -298,6 +302,10 @@ From the repo root (`torus_voltage_solver/`):
     - `d`: delete selected
     - `tab`: cycle selected electrode
     - `f`: toggle field lines
+    - `b`: toggle external toroidal background field ($B_\\phi\\propto 1/R$) in field-line tracing
+    - `p`: toggle external poloidal background field ($B_\\theta\\propto 1/R$) in field-line tracing
+    - `[` / `]`: decrease/increase `Bext0` (toroidal background amplitude)
+    - `,` / `.`: decrease/increase `Bpol0` (poloidal background amplitude)
     - `r`: recompute
     - `v`: type `V_cut` (cut voltage)
     - `i`: type the selected electrode current (extra sources/sinks on top of the cut)
@@ -324,14 +332,16 @@ From the repo root (`torus_voltage_solver/`):
   python examples/3_advanced/optimize_vmec_surface_Bn.py --model current-potential --vmec-input examples/data/vmec/input.QA_nfp2
   ```
 
+- Interactive VMEC optimization GUI (electrodes on a circular torus, target VMEC surface):
+  ```bash
+  python examples/3_advanced/gui_optimize_vmec_surface_Bn.py --vmec-input examples/data/vmec/input.QA_nfp2
+  ```
+  This GUI minimizes a p-norm objective of `(B·n)/|B|` on the target surface, and supports
+  background toroidal/poloidal fields (for tracing) with `T`/`Y` and `[`/`]`, `,`/`.`.
+
 - REGCOIL-style regularization scan (tradeoff / “L-curve”):
   ```bash
   python examples/3_advanced/scan_vmec_surface_regularization.py --vmec-input examples/data/vmec/input.QA_nfp2
-  ```
-
-- VMEC-surface normal-field minimization GUI (interactive 3D, with optimization hotkeys):
-  ```bash
-  python examples/3_advanced/gui_optimize_vmec_surface_Bn.py --vmec-input examples/data/vmec/input.QA_nfp2
   ```
 
 - Trace field lines in an analytic tokamak-like field:

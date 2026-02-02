@@ -33,6 +33,7 @@ def main() -> None:
     p.add_argument("--fit-margin", type=float, default=0.7)
 
     p.add_argument("--B0", type=float, default=1.0)
+    p.add_argument("--Bpol0", type=float, default=0.0, help="Optional background poloidal field at R=R0 [T].")
     p.add_argument("--sigma-theta", type=float, default=0.25)
     p.add_argument("--sigma-phi", type=float, default=0.25)
     p.add_argument("--sigma-s", type=float, default=1.0)
@@ -77,6 +78,7 @@ def main() -> None:
         n_theta=args.n_theta,
         n_phi=args.n_phi,
         B0=args.B0,
+        Bpol0=args.Bpol0,
         n_electrodes_max=args.n_electrodes_max,
         n_electrodes_init=args.n_electrodes_init,
         current_default_A=args.I0,

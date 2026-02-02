@@ -16,6 +16,7 @@ from torus_solver import (
     tokamak_like_field,
 )
 from torus_solver.fieldline import trace_field_line
+from torus_solver.fieldline import trace_field_lines, trace_field_lines_batch
 from torus_solver.fields import cylindrical_coords, cylindrical_unit_vectors, toroidal_poloidal_coords
 from torus_solver.optimize import SourceParams, forward_B
 from torus_solver.sources import wrap_angle
@@ -259,3 +260,73 @@ def test_biot_savart_uniform_poloidal_current_sheet_matches_ideal_toroidal():
     Bphi_an = B_an[:, 1]
     rel = jnp.max(jnp.abs(Bphi_bs - Bphi_an) / (jnp.abs(Bphi_an) + 1e-30))
     assert float(rel) < 5e-2
+
+
+def test_biot_savart_chunking_matches_direct():
+    surface = make_torus_surface(R0=3.0, a=1.0, n_theta=16, n_phi=16)
+    key = jax.random.key(0)
+    K = jax.random.normal(key, surface.r.shape, dtype=jnp.float64) * 1e3
+    pts = jax.random.normal(jax.random.fold_in(key, 1), (300, 3), dtype=jnp.float64)
+
+    B_direct = biot_savart_surface(surface, K, pts, eps=1e-9, chunk_size=None)
+    B_chunk = biot_savart_surface(surface, K, pts, eps=1e-9, chunk_size=64)
+    np.testing.assert_allclose(np.asarray(B_chunk), np.asarray(B_direct), rtol=0, atol=1e-12)
+
+
+def test_trace_field_lines_batch_matches_vmap():
+    R0 = 3.0
+    B0 = 1.0
+    theta_seed = jnp.linspace(0.0, 2 * jnp.pi, 8, endpoint=False)
+    rho = 0.4
+    R_seed = R0 + rho * jnp.cos(theta_seed)
+    Z_seed = rho * jnp.sin(theta_seed)
+    seeds = jnp.stack([R_seed, jnp.zeros_like(R_seed), Z_seed], axis=-1)
+
+    def B_fn(xyz):
+        return ideal_toroidal_field(xyz, B0=B0, R0=R0)
+
+    traj_vmap = trace_field_lines(B_fn, seeds, step_size=0.05, n_steps=50, normalize=True)
+    traj_batch = trace_field_lines_batch(B_fn, seeds, step_size=0.05, n_steps=50, normalize=True)
+    traj_batch_vmap_order = jnp.transpose(traj_batch, (1, 0, 2))
+    np.testing.assert_allclose(
+        np.asarray(traj_batch_vmap_order), np.asarray(traj_vmap), rtol=0, atol=2e-12
+    )
+
+
+def test_electrode_model_matches_documented_sigma_poisson_scaling():
+    # For the electrode model, the governing equation is:
+    #   -sigma_s * Δ_s V = s,   K = -sigma_s ∇_s V
+    # For uniform sigma_s, K should be invariant to sigma_s, while V rescales ~ 1/sigma_s.
+    surface = make_torus_surface(R0=3.0, a=1.0, n_theta=48, n_phi=64)
+
+    theta_src = jnp.array([0.3, 1.1, -0.7, 2.0])
+    phi_src = jnp.array([0.2, -1.5, 0.9, 2.2])
+    currents = jnp.array([1.0, -0.4, -0.5, -0.1])  # net ~0 already
+
+    from torus_solver import deposit_current_sources
+
+    s = deposit_current_sources(
+        surface,
+        theta_src=theta_src,
+        phi_src=phi_src,
+        currents=currents,
+        sigma_theta=0.25,
+        sigma_phi=0.25,
+    )
+
+    sigma1 = 0.5
+    sigma2 = 2.0
+    V1, _ = solve_current_potential(surface, s / sigma1, tol=1e-12, maxiter=2000)
+    V2, _ = solve_current_potential(surface, s / sigma2, tol=1e-12, maxiter=2000)
+    K1 = surface_current_from_potential(surface, V1, sigma_s=sigma1)
+    K2 = surface_current_from_potential(surface, V2, sigma_s=sigma2)
+
+    # K should match.
+    np.testing.assert_allclose(np.asarray(K1), np.asarray(K2), rtol=0, atol=2e-10)
+    # V should scale like 1/sigma: sigma*V should be invariant (up to gauge).
+    np.testing.assert_allclose(
+        np.asarray(V1) * sigma1,
+        np.asarray(V2) * sigma2,
+        rtol=0,
+        atol=2e-10,
+    )

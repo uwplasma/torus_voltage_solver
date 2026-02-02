@@ -8,7 +8,7 @@ a toroidal field inside the torus.
 You can also add *extra* sources/sinks (electrodes) on top of the cut-driven current
 using the same hotkeys as the electrode GUI.
 
-Run (from `torus_solver/`):
+Run (from the repo root, `torus_voltage_solver/`):
   python examples/2_intermediate/gui_torus_demo_inboard_cut.py
 """
 
@@ -48,6 +48,18 @@ def main() -> None:
     p.add_argument("--n-fieldlines", type=int, default=12)
     p.add_argument("--fieldline-steps", type=int, default=500)
     p.add_argument("--ds", type=float, default=0.03, help="Fieldline step size [m]")
+    p.add_argument(
+        "--Bext0",
+        type=float,
+        default=0.0,
+        help="Optional background toroidal field at R=R0 [T] (ideal 1/R).",
+    )
+    p.add_argument(
+        "--Bpol0",
+        type=float,
+        default=0.0,
+        help="Optional background poloidal field at R=R0 [T] (tokamak-like 1/R).",
+    )
     p.add_argument("--surface-opacity", type=float, default=0.35)
     args = p.parse_args()
 
@@ -75,6 +87,10 @@ def main() -> None:
         n_fieldlines=args.n_fieldlines,
         fieldline_steps=args.fieldline_steps,
         fieldline_step_size_m=args.ds,
+        Bext0=args.Bext0,
+        Bpol0=args.Bpol0,
+        bg_field_default_on=(float(args.Bext0) != 0.0),
+        bg_poloidal_default_on=(float(args.Bpol0) != 0.0),
         surface_opacity=args.surface_opacity,
     )
 

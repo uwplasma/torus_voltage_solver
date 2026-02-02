@@ -86,8 +86,11 @@ python examples/3_advanced/optimize_bumpy_axis_rotating_ellipse.py --n-steps 120
 
 Optional background field (for *field-line tracing only*):
 
-- `--Bext0 <Tesla>` adds an external ideal toroidal field $B_\phi \propto 1/R$ to the traced field lines
-  (and the ParaView `fieldlines_final.vtu`). Use `--Bext0 0` to disable.
+- `--Bext0 <Tesla>` adds an external ideal toroidal field $B_\phi = B_{\\mathrm{ext0}} (R_0/R)$ to the traced field lines.
+- `--Bpol0 <Tesla>` adds an external tokamak-like poloidal component
+  $B_\\theta = B_{\\mathrm{pol0}} (R_0/R)$ to the traced field lines.
+
+Use `--Bext0 0 --Bpol0 0` to disable.
 
 Outputs include:
 
@@ -110,5 +113,8 @@ Press `E` to export the current state to ParaView.
 
 Field-line background toggle:
 
-- press `T` to toggle including the background $B_\phi\propto 1/R$ field in **field-line tracing** (visualization only).
-  The optimization objective and the displayed target-surface `(B·n)/|B|` use the configured `B0` regardless.
+- press `T` to toggle including the background toroidal $B_\phi\\propto 1/R$ field in **field-line tracing** (visualization only).
+- press `Y` to toggle including the background poloidal $B_\\theta\\propto 1/R$ field in **field-line tracing** (visualization only).
+- press `[`/`]` to decrease/increase `B0`, and `,`/`.` to decrease/increase `Bpol0`.
+
+The optimization objective and the displayed target-surface `(B·n)/|B|` always use the configured `B0` and `Bpol0`.

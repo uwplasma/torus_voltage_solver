@@ -29,6 +29,16 @@ $$
 -\sigma_s \Delta_s V = s.
 $$
 
+In the current implementation, `solve_current_potential(...)` solves the *unit-conductivity* form
+$-\Delta_s V = b$ (with a gauge fix), so the electrode model is implemented as:
+
+$$
+-\Delta_s V = \frac{s}{\sigma_s},\qquad \mathbf K = -\sigma_s \nabla_s V.
+$$
+
+For **uniform** $\sigma_s$, the resulting $\mathbf K$ is (up to numerical error) **independent**
+of $\sigma_s$; changing $\sigma_s$ primarily rescales the potential $V$.
+
 ### Global constraints on a closed surface
 
 Because the torus surface is closed, the injected current must sum to zero for a steady solution:

@@ -13,7 +13,7 @@ import optax
 
 from .biot_savart import MU0, biot_savart_surface
 from .fieldline import trace_field_lines_batch
-from .fields import ideal_toroidal_field
+from .fields import tokamak_like_field
 from .optimize import SourceParams
 from .poisson import solve_current_potential, surface_current_from_potential
 from .sources import deposit_current_sources
@@ -68,7 +68,11 @@ class GUIConfig:
     # Optional background field for field-line tracing / visualization:
     # ideal toroidal B ~ 1/R with magnitude Bext0 at R=R0.
     Bext0: float = 1e-4  # Tesla at R=R0 (0 disables)
+    # Optional background poloidal field (tokamak-like proxy) for field-line tracing:
+    # B_pol = Bpol0 * (R0/R) e_theta.
+    Bpol0: float = 0.0  # Tesla at R=R0 (0 disables)
     bg_field_default_on: bool = False
+    bg_poloidal_default_on: bool = False
 
     # Rendering
     surface_opacity: float = 0.35
@@ -106,7 +110,11 @@ class CutGUIConfig:
     # Optional background field for field-line tracing / visualization:
     # ideal toroidal B ~ 1/R with magnitude Bext0 at R=R0.
     Bext0: float = 1e-4  # Tesla at R=R0 (0 disables)
+    # Optional background poloidal field (tokamak-like proxy) for field-line tracing:
+    # B_pol = Bpol0 * (R0/R) e_theta.
+    Bpol0: float = 0.0  # Tesla at R=R0 (0 disables)
     bg_field_default_on: bool = False
+    bg_poloidal_default_on: bool = False
 
     # Rendering
     surface_opacity: float = 0.35
@@ -129,6 +137,8 @@ class VmecOptGUIConfig:
 
     # Background field (ideal toroidal 1/R).
     B0: float = 1.0  # Tesla at R=R0
+    # Optional background poloidal field (tokamak-like proxy) at R=R0.
+    Bpol0: float = 0.0  # Tesla at R=R0
     # For diagnostics: allow tracing field lines with/without the background field.
     trace_include_bg_default_on: bool = True
 
@@ -152,6 +162,7 @@ class VmecOptGUIConfig:
     reg_currents: float = 1e-3  # weight on ⟨(I/I_scale)^2⟩
     optimize_positions: bool = True
     steps_per_opt: int = 25
+    bn_p: int = 8  # use p-norm objective to reduce max|Bn/B| (p>=2; p→∞ approximates max)
 
     # Poisson solve.
     cg_tol: float = 1e-10
@@ -367,7 +378,10 @@ class TorusElectrodeGUI:  # pragma: no cover
 
         self.scalar_name: ScalarName = "|K|"
         self.show_fieldlines = True
-        self.include_bg_field = bool(self.cfg.bg_field_default_on and float(self.cfg.Bext0) != 0.0)
+        self.Bext0 = float(self.cfg.Bext0)
+        self.Bpol0 = float(self.cfg.Bpol0)
+        self.include_bg_tor = bool(self.cfg.bg_field_default_on and self.Bext0 != 0.0)
+        self.include_bg_pol = bool(self.cfg.bg_poloidal_default_on and self.Bpol0 != 0.0)
 
         # Cached computed state (numpy) so we can update visualization (e.g. scalar choice)
         # without re-running the JAX solve.
@@ -556,6 +570,9 @@ class TorusElectrodeGUI:  # pragma: no cover
             "  c: cycle surface scalar (|K|, V, s, Kθ, Kφ)\n"
             "  f: toggle field lines\n"
             "  b: toggle external toroidal field (ideal 1/R)\n"
+            "  p: toggle external poloidal field (tokamak-like 1/R)\n"
+            "  [/]: decrease/increase Bext0\n"
+            "  ,/. : decrease/increase Bpol0\n"
             "  r: recompute\n"
             "  e: export ParaView (.vtu/.vtm)\n"
             "  i (or v): type selected I\n"
@@ -583,8 +600,9 @@ class TorusElectrodeGUI:  # pragma: no cover
             f"Selected: {sel_txt}\n"
             f"Mode: {self.mode}\n"
             f"Scalar: {self.scalar_name}\n"
-            f"external Bphi~1/R: {'ON' if self.include_bg_field else 'OFF'}  "
-            f"(Bext0={float(self.cfg.Bext0):.3g} T at R0={self.cfg.R0:g} m)\n"
+            f"bg toroidal: {'ON' if self.include_bg_tor else 'OFF'}  Bext0={self.Bext0:.3g} T   "
+            f"bg poloidal: {'ON' if self.include_bg_pol else 'OFF'}  Bpol0={self.Bpol0:.3g} T   "
+            f"(at R0={self.cfg.R0:g} m)\n"
             f"sigma_theta={self.cfg.sigma_theta:.3f}  sigma_phi={self.cfg.sigma_phi:.3f}\n"
             f"fieldlines: {self.cfg.n_fieldlines}  steps: {self.cfg.fieldline_steps}  ds: {self.cfg.fieldline_step_size_m}\n"
         )
@@ -676,7 +694,10 @@ class TorusElectrodeGUI:  # pragma: no cover
         phi_src: jnp.ndarray,
         currents_raw: jnp.ndarray,
         active: jnp.ndarray,
-        include_bg_field: jnp.ndarray,
+        Bext0: jnp.ndarray,
+        Bpol0: jnp.ndarray,
+        include_bg_tor: jnp.ndarray,
+        include_bg_pol: jnp.ndarray,
         compute_traj: jnp.ndarray,
     ):
         # Project currents to net-zero over active electrodes.
@@ -694,8 +715,10 @@ class TorusElectrodeGUI:  # pragma: no cover
             sigma_theta=self.cfg.sigma_theta,
             sigma_phi=self.cfg.sigma_phi,
         )
+        if float(self.cfg.sigma_s) <= 0.0:
+            raise ValueError("sigma_s must be > 0 for the electrode model.")
         V, _ = solve_current_potential(
-            self.surface, s, tol=self.cfg.cg_tol, maxiter=self.cfg.cg_maxiter
+            self.surface, s / float(self.cfg.sigma_s), tol=self.cfg.cg_tol, maxiter=self.cfg.cg_maxiter
         )
         K = surface_current_from_potential(self.surface, V, sigma_s=self.cfg.sigma_s)
 
@@ -705,10 +728,9 @@ class TorusElectrodeGUI:  # pragma: no cover
 
         def B_fn(xyz: jnp.ndarray) -> jnp.ndarray:
             B = biot_savart_surface(self.surface, K, xyz, eps=self.cfg.biot_savart_eps)
-            if float(self.cfg.Bext0) != 0.0:
-                B = B + jnp.asarray(include_bg_field, dtype=B.dtype) * ideal_toroidal_field(
-                    xyz, B0=float(self.cfg.Bext0), R0=float(self.cfg.R0)
-                )
+            Btor = jnp.asarray(include_bg_tor, dtype=B.dtype) * jnp.asarray(Bext0, dtype=B.dtype)
+            Bpol = jnp.asarray(include_bg_pol, dtype=B.dtype) * jnp.asarray(Bpol0, dtype=B.dtype)
+            B = B + tokamak_like_field(xyz, B_tor0=Btor, B_pol0=Bpol, R0=float(self.cfg.R0))
             return B
 
         n_steps = self.cfg.fieldline_steps
@@ -745,7 +767,10 @@ class TorusElectrodeGUI:  # pragma: no cover
             ph,
             Iraw,
             act,
-            jnp.asarray(self.include_bg_field),
+            jnp.asarray(self.Bext0, dtype=jnp.float64),
+            jnp.asarray(self.Bpol0, dtype=jnp.float64),
+            jnp.asarray(self.include_bg_tor),
+            jnp.asarray(self.include_bg_pol),
             jnp.asarray(self.show_fieldlines),
         )
         V.block_until_ready()
@@ -889,11 +914,44 @@ class TorusElectrodeGUI:  # pragma: no cover
                 return
             self.field_actor.SetVisibility(False)
         elif key_sym in ("b", "B"):
-            self.include_bg_field = not self.include_bg_field
+            self.include_bg_tor = not self.include_bg_tor
             print(
-                f"External toroidal field (1/R): {'ON' if self.include_bg_field else 'OFF'} "
-                f"(Bext0={float(self.cfg.Bext0):.3g} T at R0={self.cfg.R0:g} m)"
+                f"External toroidal field (1/R): {'ON' if self.include_bg_tor else 'OFF'} "
+                f"(Bext0={self.Bext0:.3g} T at R0={self.cfg.R0:g} m)"
             )
+            if self.show_fieldlines:
+                self.update_solution()
+                return
+        elif key_sym in ("p", "P"):
+            self.include_bg_pol = not self.include_bg_pol
+            print(
+                f"External poloidal field (1/R): {'ON' if self.include_bg_pol else 'OFF'} "
+                f"(Bpol0={self.Bpol0:.3g} T at R0={self.cfg.R0:g} m)"
+            )
+            if self.show_fieldlines:
+                self.update_solution()
+                return
+        elif key_sym in ("bracketleft",):
+            self.Bext0 = float(self.Bext0) / 1.2
+            print(f"Bext0 -> {self.Bext0:.6g} T")
+            if self.show_fieldlines:
+                self.update_solution()
+                return
+        elif key_sym in ("bracketright",):
+            self.Bext0 = float(self.Bext0) * 1.2
+            print(f"Bext0 -> {self.Bext0:.6g} T")
+            if self.show_fieldlines:
+                self.update_solution()
+                return
+        elif key_sym in ("comma",):
+            self.Bpol0 = float(self.Bpol0) / 1.2
+            print(f"Bpol0 -> {self.Bpol0:.6g} T")
+            if self.show_fieldlines:
+                self.update_solution()
+                return
+        elif key_sym in ("period",):
+            self.Bpol0 = float(self.Bpol0) * 1.2
+            print(f"Bpol0 -> {self.Bpol0:.6g} T")
             if self.show_fieldlines:
                 self.update_solution()
                 return
@@ -1110,7 +1168,10 @@ class TorusCutVoltageGUI:  # pragma: no cover
 
         self.scalar_name: ScalarName = "|K|"
         self.show_fieldlines = True
-        self.include_bg_field = bool(self.cfg.bg_field_default_on and float(self.cfg.Bext0) != 0.0)
+        self.Bext0 = float(self.cfg.Bext0)
+        self.Bpol0 = float(self.cfg.Bpol0)
+        self.include_bg_tor = bool(self.cfg.bg_field_default_on and self.Bext0 != 0.0)
+        self.include_bg_pol = bool(self.cfg.bg_poloidal_default_on and self.Bpol0 != 0.0)
         self.V_cut = float(cfg.V_cut_default)
 
         # Cached computed state (numpy) so we can update visualization without recomputing.
@@ -1358,6 +1419,8 @@ class TorusCutVoltageGUI:  # pragma: no cover
             "  c: cycle scalar (|K|, V, s, Kθ, Kφ)\n"
             "  f: toggle field lines    r: recompute\n"
             "  b: toggle external toroidal field (ideal 1/R)\n"
+            "  p: toggle external poloidal field (tokamak-like 1/R)\n"
+            "  [/]: decrease/increase Bext0    ,/. : decrease/increase Bpol0\n"
             "  v: type V_cut    i: type selected I\n"
             "  e: export ParaView (.vtu/.vtm)\n"
             "  s: save screenshot\n"
@@ -1381,8 +1444,9 @@ class TorusCutVoltageGUI:  # pragma: no cover
             f"V_cut={self.V_cut:+.3f}  theta_cut={float(self.cfg.theta_cut)%(2*np.pi):.3f}  sigma_s={self.cfg.sigma_s:.3f}\n"
             f"Active electrodes: {n_active}/{self.N}   Selected: {sel_txt}   Mode: {self.mode}\n"
             f"Scalar: {self.scalar_name}\n"
-            f"external Bphi~1/R: {'ON' if self.include_bg_field else 'OFF'}  "
-            f"(Bext0={float(self.cfg.Bext0):.3g} T at R0={self.cfg.R0:g} m)\n"
+            f"bg toroidal: {'ON' if self.include_bg_tor else 'OFF'}  Bext0={self.Bext0:.3g} T   "
+            f"bg poloidal: {'ON' if self.include_bg_pol else 'OFF'}  Bpol0={self.Bpol0:.3g} T   "
+            f"(at R0={self.cfg.R0:g} m)\n"
             f"sigma_theta={self.cfg.sigma_theta:.3f}  sigma_phi={self.cfg.sigma_phi:.3f}\n"
             f"fieldlines: {self.cfg.n_fieldlines}  steps: {self.cfg.fieldline_steps}  ds: {self.cfg.fieldline_step_size_m}\n"
         )
@@ -1413,7 +1477,10 @@ class TorusCutVoltageGUI:  # pragma: no cover
         currents_raw: jnp.ndarray,
         active: jnp.ndarray,
         V_cut: jnp.ndarray,
-        include_bg_field: jnp.ndarray,
+        Bext0: jnp.ndarray,
+        Bpol0: jnp.ndarray,
+        include_bg_tor: jnp.ndarray,
+        include_bg_pol: jnp.ndarray,
         compute_traj: jnp.ndarray,
     ):
         # Project currents to net-zero over active electrodes.
@@ -1433,7 +1500,10 @@ class TorusCutVoltageGUI:  # pragma: no cover
             sigma_phi=self.cfg.sigma_phi,
         )
         V_e, _ = solve_current_potential(
-            self.surface, s, tol=self.cfg.cg_tol, maxiter=self.cfg.cg_maxiter
+            self.surface,
+            s / float(self.cfg.sigma_s),
+            tol=self.cfg.cg_tol,
+            maxiter=self.cfg.cg_maxiter,
         )
         K_e = surface_current_from_potential(self.surface, V_e, sigma_s=self.cfg.sigma_s)
 
@@ -1454,10 +1524,9 @@ class TorusCutVoltageGUI:  # pragma: no cover
 
         def B_fn(xyz: jnp.ndarray) -> jnp.ndarray:
             B = biot_savart_surface(self.surface, K, xyz, eps=self.cfg.biot_savart_eps)
-            if float(self.cfg.Bext0) != 0.0:
-                B = B + jnp.asarray(include_bg_field, dtype=B.dtype) * ideal_toroidal_field(
-                    xyz, B0=float(self.cfg.Bext0), R0=float(self.cfg.R0)
-                )
+            Btor = jnp.asarray(include_bg_tor, dtype=B.dtype) * jnp.asarray(Bext0, dtype=B.dtype)
+            Bpol = jnp.asarray(include_bg_pol, dtype=B.dtype) * jnp.asarray(Bpol0, dtype=B.dtype)
+            B = B + tokamak_like_field(xyz, B_tor0=Btor, B_pol0=Bpol, R0=float(self.cfg.R0))
             return B
 
         n_steps = self.cfg.fieldline_steps
@@ -1570,7 +1639,10 @@ class TorusCutVoltageGUI:  # pragma: no cover
             Iraw,
             act,
             jnp.asarray(self.V_cut),
-            jnp.asarray(self.include_bg_field),
+            jnp.asarray(self.Bext0),
+            jnp.asarray(self.Bpol0),
+            jnp.asarray(self.include_bg_tor),
+            jnp.asarray(self.include_bg_pol),
             jnp.asarray(self.show_fieldlines),
         )
         V_vis.block_until_ready()
@@ -1742,12 +1814,41 @@ class TorusCutVoltageGUI:  # pragma: no cover
                 return
             self.field_actor.SetVisibility(False)
         elif key_sym in ("b", "B"):
-            self.include_bg_field = not self.include_bg_field
+            self.include_bg_tor = not self.include_bg_tor
             print(
-                f"External toroidal field (1/R): {'ON' if self.include_bg_field else 'OFF'} "
-                f"(Bext0={float(self.cfg.Bext0):.3g} T at R0={self.cfg.R0:g} m)"
+                f"External toroidal field (1/R): {'ON' if self.include_bg_tor else 'OFF'} "
+                f"(Bext0={self.Bext0:.3g} T at R0={self.cfg.R0:g} m)"
             )
             if self.show_fieldlines:
+                self.update_solution()
+                return
+        elif key_sym in ("p", "P"):
+            self.include_bg_pol = not self.include_bg_pol
+            print(
+                f"External poloidal field (tokamak-like 1/R): {'ON' if self.include_bg_pol else 'OFF'} "
+                f"(Bpol0={self.Bpol0:.3g} T at R0={self.cfg.R0:g} m)"
+            )
+            if self.show_fieldlines:
+                self.update_solution()
+                return
+        elif key_sym in ("bracketleft",):
+            self.Bext0 = float(self.Bext0 / 1.2)
+            if self.show_fieldlines and self.include_bg_tor:
+                self.update_solution()
+                return
+        elif key_sym in ("bracketright",):
+            self.Bext0 = float(self.Bext0 * 1.2)
+            if self.show_fieldlines and self.include_bg_tor:
+                self.update_solution()
+                return
+        elif key_sym in ("comma",):
+            self.Bpol0 = float(self.Bpol0 / 1.2)
+            if self.show_fieldlines and self.include_bg_pol:
+                self.update_solution()
+                return
+        elif key_sym in ("period",):
+            self.Bpol0 = float(self.Bpol0 * 1.2)
+            if self.show_fieldlines and self.include_bg_pol:
                 self.update_solution()
                 return
         elif key_sym in ("r", "R"):
@@ -1938,7 +2039,9 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
 
         # Background field control.
         self.B0 = float(cfg.B0)
-        self.trace_include_bg = bool(cfg.trace_include_bg_default_on)
+        self.Bpol0 = float(cfg.Bpol0)
+        self.trace_include_bg_tor = bool(cfg.trace_include_bg_default_on and self.B0 != 0.0)
+        self.trace_include_bg_pol = bool(cfg.trace_include_bg_default_on and self.Bpol0 != 0.0)
 
         # Scaling: I_phys = current_scale * currents_raw (then projected to net-zero over active electrodes).
         self.auto_current_scale = cfg.current_scale is None
@@ -1998,6 +2101,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
             "none",
             "current",
             "B0",
+            "Bpol0",
             "current_scale",
             "lr",
             "steps_per_opt",
@@ -2074,10 +2178,12 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         currents_raw: jnp.ndarray,
         active: jnp.ndarray,
         B0: jnp.ndarray,
+        Bpol0: jnp.ndarray,
         current_scale: jnp.ndarray,
         sigma_s: jnp.ndarray,
         reg_currents: jnp.ndarray,
-        trace_include_bg: jnp.ndarray,
+        trace_include_bg_tor: jnp.ndarray,
+        trace_include_bg_pol: jnp.ndarray,
         compute_traj: jnp.ndarray,
     ):
         # Project currents to net-zero over active electrodes (in raw units).
@@ -2098,7 +2204,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         )
         V, _ = solve_current_potential(
             self.surface,
-            s,
+            s / (sigma_s + 1e-30),
             tol=self.cfg.cg_tol,
             maxiter=self.cfg.cg_maxiter,
             use_preconditioner=self.cfg.use_preconditioner,
@@ -2110,7 +2216,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         Kphi = jnp.sum(K * self._e_phi, axis=-1)
 
         B_shell = biot_savart_surface(self.surface, K, self._target_points, eps=self.cfg.biot_savart_eps)
-        B_bg = ideal_toroidal_field(self._target_points, B0=B0, R0=self.cfg.R0)
+        B_bg = tokamak_like_field(self._target_points, B_tor0=B0, B_pol0=Bpol0, R0=self.cfg.R0)
         B_tot = B_bg + B_shell
         Bn = jnp.sum(B_tot * self._target_normals, axis=-1)
         Bmag = jnp.linalg.norm(B_tot, axis=-1)
@@ -2118,19 +2224,23 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
 
         w = self._target_weights
         wsum = jnp.sum(w)
-        loss_bn = jnp.sum(w * (Bn_over_B * Bn_over_B)) / (wsum + 1e-30)
+        # Use a weighted p-norm objective to more strongly penalize localized peaks in Bn/B.
+        p = float(self.cfg.bn_p)
+        abs_bn = jnp.abs(Bn_over_B)
+        mean_p = jnp.sum(w * (abs_bn**p)) / (wsum + 1e-30)
+        loss_bn = mean_p ** (2.0 / p)
         loss_reg = reg_currents * jnp.mean(Iraw * Iraw)
         loss = loss_bn + loss_reg
 
-        Bn_over_B_rms = jnp.sqrt(loss_bn)
+        Bn_over_B_rms = jnp.sqrt(jnp.sum(w * (Bn_over_B * Bn_over_B)) / (wsum + 1e-30))
         Bn_over_B_max = jnp.max(jnp.abs(Bn_over_B))
         I_rms = jnp.sqrt(jnp.mean(I * I))
 
         def B_fn(xyz: jnp.ndarray) -> jnp.ndarray:
             B = biot_savart_surface(self.surface, K, xyz, eps=self.cfg.biot_savart_eps)
-            B = B + jnp.asarray(trace_include_bg, dtype=B.dtype) * ideal_toroidal_field(
-                xyz, B0=B0, R0=self.cfg.R0
-            )
+            Btor = jnp.asarray(trace_include_bg_tor, dtype=B.dtype) * jnp.asarray(B0, dtype=B.dtype)
+            Bpol = jnp.asarray(trace_include_bg_pol, dtype=B.dtype) * jnp.asarray(Bpol0, dtype=B.dtype)
+            B = B + tokamak_like_field(xyz, B_tor0=Btor, B_pol0=Bpol, R0=self.cfg.R0)
             return B
 
         n_steps = self.cfg.fieldline_steps
@@ -2173,6 +2283,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         *,
         active: jnp.ndarray,
         B0: jnp.ndarray,
+        Bpol0: jnp.ndarray,
         current_scale: jnp.ndarray,
         sigma_s: jnp.ndarray,
         reg_currents: jnp.ndarray,
@@ -2199,9 +2310,11 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
                 params.currents_raw,
                 active,
                 B0,
+                Bpol0,
                 current_scale,
                 sigma_s,
                 reg_currents,
+                jnp.asarray(True),
                 jnp.asarray(True),
                 jnp.asarray(False),
             )
@@ -2223,6 +2336,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         *,
         active: jnp.ndarray,
         B0: jnp.ndarray,
+        Bpol0: jnp.ndarray,
         current_scale: jnp.ndarray,
         sigma_s: jnp.ndarray,
         reg_currents: jnp.ndarray,
@@ -2232,6 +2346,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
             params,
             active=active,
             B0=B0,
+            Bpol0=Bpol0,
             current_scale=current_scale,
             sigma_s=sigma_s,
             reg_currents=reg_currents,
@@ -2446,11 +2561,14 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
             "  tab: cycle selected\n"
             "  c: cycle torus scalar (|K|, V, s, Kθ, Kφ)\n"
             "  f: toggle field lines\n"
-            "  t: toggle include background field in field lines\n"
+            "  t: toggle toroidal background in field lines\n"
+            "  y: toggle poloidal background in field lines\n"
+            "  [/]: decrease/increase B0    ,/. : decrease/increase Bpol0\n"
             "  r: recompute\n"
             "  e: export ParaView (.vtu/.vtm)\n"
             "  i (or v): type selected electrode current [A]\n"
             "  b: type background B0 [T]\n"
+            "  u: type background Bpol0 [T]\n"
             "  k: type current_scale [A/unit]\n"
             "  l: type learning rate\n"
             "  n: type opt steps per 'o'\n"
@@ -2478,19 +2596,21 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         metric_lines = ""
         if m:
             metric_lines = (
-                f"loss={m.get('loss', np.nan):.3e}  bn={m.get('loss_bn', np.nan):.3e}  reg={m.get('loss_reg', np.nan):.3e}\n"
+                f"loss={m.get('loss', np.nan):.3e}  bn_obj={m.get('loss_bn', np.nan):.3e}  reg={m.get('loss_reg', np.nan):.3e}\n"
                 f"rms(Bn/B)={m.get('Bn_over_B_rms', np.nan):.3e}  max|Bn/B|={m.get('Bn_over_B_max', np.nan):.3e}  I_rms={m.get('I_rms_A', np.nan):.3e} A\n"
             )
 
         auto_txt = "auto" if self.auto_current_scale else "manual"
-        trace_bg = "ON" if self.trace_include_bg else "OFF"
+        trace_tor = "ON" if self.trace_include_bg_tor else "OFF"
+        trace_pol = "ON" if self.trace_include_bg_pol else "OFF"
         return (
             f"Active electrodes: {n_active}/{self.N}   optimize_positions={self.optimize_positions}\n"
             f"Selected: {sel_txt}\n"
             f"Mode: {self.mode}\n"
             f"Torus scalar: {self.scalar_name}   Target scalar: (B·n)/|B|\n"
-            f"B0={self.B0:.6g} T   current_scale={self.current_scale:.3e} A/unit ({auto_txt})   trace_bg={trace_bg}\n"
-            f"lr={self.lr:.3e}   steps_per_opt={self.steps_per_opt}   reg_currents={self.reg_currents:.3e}   sigma_s={self.sigma_s:.3e}\n"
+            f"B0={self.B0:.6g} T   Bpol0={self.Bpol0:.6g} T   trace_tor={trace_tor}  trace_pol={trace_pol}\n"
+            f"current_scale={self.current_scale:.3e} A/unit ({auto_txt})\n"
+            f"lr={self.lr:.3e}   steps_per_opt={self.steps_per_opt}   bn_p={int(self.cfg.bn_p)}   reg_currents={self.reg_currents:.3e}   sigma_s={self.sigma_s:.3e}\n"
             + metric_lines
         )
 
@@ -2499,7 +2619,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
 
         if self._edit_mode == "none":
             self.input_text.SetInput(
-                "Type: i/v=current [A], b=B0, k=current_scale, l=lr, n=steps, g=reg, x=sigma_s"
+                "Type: i/v=current [A], b=B0, u=Bpol0, k=current_scale, l=lr, n=steps, g=reg, x=sigma_s"
             )
         else:
             self.input_text.SetInput(
@@ -2613,10 +2733,12 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
             Iraw,
             act,
             jnp.asarray(self.B0, dtype=jnp.float64),
+            jnp.asarray(self.Bpol0, dtype=jnp.float64),
             jnp.asarray(self.current_scale, dtype=jnp.float64),
             jnp.asarray(self.sigma_s, dtype=jnp.float64),
             jnp.asarray(self.reg_currents, dtype=jnp.float64),
-            jnp.asarray(self.trace_include_bg),
+            jnp.asarray(self.trace_include_bg_tor),
+            jnp.asarray(self.trace_include_bg_pol),
             jnp.asarray(self.show_fieldlines),
         )
         V.block_until_ready()
@@ -2761,6 +2883,8 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
                 self.B0 = float(val)
                 if self.auto_current_scale:
                     self.current_scale = self._auto_current_scale(B0=self.B0, R0=self.cfg.R0)
+            elif mode == "Bpol0":
+                self.Bpol0 = float(val)
             elif mode == "current_scale":
                 self.current_scale = float(val)
                 self.auto_current_scale = False
@@ -2801,6 +2925,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         params = self._params_jax()
         act = jnp.asarray(self.active, dtype=jnp.float64)
         B0 = jnp.asarray(self.B0, dtype=jnp.float64)
+        Bpol0 = jnp.asarray(self.Bpol0, dtype=jnp.float64)
         current_scale = jnp.asarray(self.current_scale, dtype=jnp.float64)
         sigma_s = jnp.asarray(self.sigma_s, dtype=jnp.float64)
         reg = jnp.asarray(self.reg_currents, dtype=jnp.float64)
@@ -2814,6 +2939,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
                 self._opt_state,
                 active=act,
                 B0=B0,
+                Bpol0=Bpol0,
                 current_scale=current_scale,
                 sigma_s=sigma_s,
                 reg_currents=reg,
@@ -2852,6 +2978,9 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
             return
         if key_sym in ("b", "B"):
             self._begin_edit("B0")
+            return
+        if key_sym in ("u", "U"):
+            self._begin_edit("Bpol0")
             return
         if key_sym in ("k", "K"):
             self._begin_edit("current_scale")
@@ -2904,11 +3033,43 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
                 return
             self.field_actor.SetVisibility(False)
         elif key_sym in ("t", "T"):
-            self.trace_include_bg = not self.trace_include_bg
-            print(f"Fieldline tracing background field: {'ON' if self.trace_include_bg else 'OFF'} (B0={self.B0:.6g} T)")
+            self.trace_include_bg_tor = not self.trace_include_bg_tor
+            print(
+                f"Fieldline tracing background (toroidal): {'ON' if self.trace_include_bg_tor else 'OFF'} "
+                f"(B0={self.B0:.6g} T)"
+            )
             if self.show_fieldlines:
                 self.update_solution()
                 return
+        elif key_sym in ("y", "Y"):
+            self.trace_include_bg_pol = not self.trace_include_bg_pol
+            print(
+                f"Fieldline tracing background (poloidal): {'ON' if self.trace_include_bg_pol else 'OFF'} "
+                f"(Bpol0={self.Bpol0:.6g} T)"
+            )
+            if self.show_fieldlines:
+                self.update_solution()
+                return
+        elif key_sym in ("bracketleft",):
+            self.B0 = float(self.B0 / 1.2)
+            if self.auto_current_scale:
+                self.current_scale = self._auto_current_scale(B0=self.B0, R0=self.cfg.R0)
+            self.update_solution()
+            return
+        elif key_sym in ("bracketright",):
+            self.B0 = float(self.B0 * 1.2)
+            if self.auto_current_scale:
+                self.current_scale = self._auto_current_scale(B0=self.B0, R0=self.cfg.R0)
+            self.update_solution()
+            return
+        elif key_sym in ("comma",):
+            self.Bpol0 = float(self.Bpol0 / 1.2)
+            self.update_solution()
+            return
+        elif key_sym in ("period",):
+            self.Bpol0 = float(self.Bpol0 * 1.2)
+            self.update_solution()
+            return
         elif key_sym in ("r", "R"):
             self.update_solution()
             return

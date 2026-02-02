@@ -86,8 +86,15 @@ def surface_solution(
         sigma_theta=sigma_theta,
         sigma_phi=sigma_phi,
     )
+    # Electrode model: -σ_s Δ_s V = s, K = -σ_s ∇_s V.
+    # For uniform σ_s, the resulting K is independent of σ_s (only V rescales),
+    # but we keep σ_s here to match the documented equations and allow future
+    # extensions (e.g. nonuniform conductivity).
+    sigma_s_eff = float(sigma_s)
+    if sigma_s_eff <= 0.0:
+        raise ValueError("sigma_s must be > 0 for the electrode model.")
     V, _ = solve_current_potential(
-        surface, s, tol=tol, maxiter=maxiter, use_preconditioner=use_preconditioner
+        surface, s / sigma_s_eff, tol=tol, maxiter=maxiter, use_preconditioner=use_preconditioner
     )
     K = surface_current_from_potential(surface, V, sigma_s=sigma_s)
     return currents, s, V, K

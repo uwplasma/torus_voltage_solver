@@ -49,7 +49,7 @@ from torus_solver import make_torus_surface
 from torus_solver.biot_savart import MU0, biot_savart_surface
 from torus_solver.current_potential import surface_current_from_current_potential_with_net_currents
 from torus_solver.fieldline import trace_field_lines_batch
-from torus_solver.fields import ideal_toroidal_field
+from torus_solver.fields import ideal_toroidal_field, tokamak_like_field
 from torus_solver.metrics import bn_over_B_metrics, weighted_p_norm
 from torus_solver.optimize import SourceParams, enforce_net_zero, surface_solution
 from torus_solver.paraview import fieldlines_to_vtu, point_cloud_to_vtu, torus_surface_to_vtu, write_vtm, write_vtu
@@ -227,6 +227,16 @@ def main() -> None:
     # Toroidal field scale [T]. In electrode mode this is an imposed background field.
     # In current-potential mode this sets net_poloidal_current via Ampere's law.
     p.add_argument("--B0", type=float, default=1.0, help="Toroidal field scale at R=R0 [T]")
+    p.add_argument(
+        "--Bpol0",
+        type=float,
+        default=0.0,
+        help=(
+            "Optional external poloidal background field scale at R=R0 [T]. "
+            "This is added to the total field as (Bpol0*R0/R) e_theta (a tokamak-like proxy). "
+            "Default 0 disables."
+        ),
+    )
 
     # Electrode model / optimization.
     p.add_argument("--n-sources", type=int, default=32)
@@ -243,7 +253,7 @@ def main() -> None:
         ),
     )
     p.add_argument("--init-current-raw-rms", type=float, default=1.0, help="Init RMS of `currents_raw`")
-    p.add_argument("--n-steps", type=int, default=500)
+    p.add_argument("--n-steps", type=int, default=200)
     p.add_argument("--lr", type=float, default=1e-2)
     p.add_argument(
         "--reg-currents",
@@ -454,6 +464,11 @@ def main() -> None:
                 net_toroidal_current_A=net_toroidal_current_A,
             )
             B_obj = biot_savart_surface(surface, K, eval_obj, eps=float(args.biot_savart_eps))
+            if float(args.Bpol0) != 0.0:
+                # Optional "plasma current" proxy: add an external poloidal component ~ 1/R.
+                B_obj = B_obj + tokamak_like_field(
+                    eval_obj, B_tor0=0.0, B_pol0=float(args.Bpol0), R0=float(args.R0)
+                )
             ratio_obj = jnp.sum(B_obj * normals_obj, axis=-1) / (jnp.linalg.norm(B_obj, axis=-1) + 1e-30)
             bn_metric = weighted_p_norm(ratio_obj, weights_obj, p=float(args.bn_p))
             loss_bn = bn_metric * bn_metric
@@ -508,18 +523,36 @@ def main() -> None:
         print(f"      grad norms: ||dL/dcos||={g0_cos:.3e}  ||dL/dsin||={g0_sin:.3e}")
 
         solver = LBFGS(fun=loss_fn_potential, has_aux=True, maxiter=int(args.n_steps), tol=float(args.lbfgs_tol))
+        target_max = 5e-3  # 0.5% (matches README/docs target)
         t0 = time.perf_counter()
-        res = solver.run(init_pot)
-        res.params.cos_mn.block_until_ready()
+        pot = init_pot
+        state = solver.init_state(pot)
+        for k in range(int(args.n_steps)):
+            pot, state = solver.update(pot, state)
+            aux = state.aux
+            if (k % 25) == 0 or k == int(args.n_steps) - 1:
+                print(
+                    "iter={:4d} loss={:.3e}  rms(Bn/B)={:.3e}  max|Bn/B|={:.3e}  K_rms={:.3e} A/m".format(
+                        k,
+                        float(aux["loss"]),
+                        float(aux["Bn_over_B_rms"]),
+                        float(aux["Bn_over_B_max"]),
+                        float(aux["K_rms"]),
+                    )
+                )
+            if float(aux["Bn_over_B_max"]) < target_max:
+                print(f"Early stop: reached max|Bn/B|<{target_max:g} at iter={k}.")
+                break
+        pot.cos_mn.block_until_ready()
         t1 = time.perf_counter()
-        pot_best = res.params
+        pot_best = pot
         try:
             print(
                 "LBFGS state: iter={}  error={:.3e}  stepsize={:.3e}  failed_linesearch={}".format(
-                    int(res.state.iter_num),
-                    float(res.state.error),
-                    float(res.state.stepsize),
-                    bool(res.state.failed_linesearch),
+                    int(state.iter_num),
+                    float(state.error),
+                    float(state.stepsize),
+                    bool(state.failed_linesearch),
                 )
             )
         except Exception as e:
@@ -548,6 +581,10 @@ def main() -> None:
             net_toroidal_current_A=net_toroidal_current_A,
         )
         B0_tot = biot_savart_surface(surface, K0, eval_points, eps=float(args.biot_savart_eps))
+        if float(args.Bpol0) != 0.0:
+            B0_tot = B0_tot + tokamak_like_field(
+                eval_points, B_tor0=0.0, B_pol0=float(args.Bpol0), R0=float(args.R0)
+            )
         ratio0, rms0, max0 = bn_over_B_metrics(B0_tot, normals, weights)
 
         Phi1_sv = Phi_from_params(pot_best)
@@ -558,6 +595,10 @@ def main() -> None:
             net_toroidal_current_A=net_toroidal_current_A,
         )
         B1_tot = biot_savart_surface(surface, K1, eval_points, eps=float(args.biot_savart_eps))
+        if float(args.Bpol0) != 0.0:
+            B1_tot = B1_tot + tokamak_like_field(
+                eval_points, B_tor0=0.0, B_pol0=float(args.Bpol0), R0=float(args.R0)
+            )
         ratio1, rms1, max1 = bn_over_B_metrics(B1_tot, normals, weights)
 
         print("Bn/B summary on target surface (area-weighted)")
@@ -566,6 +607,8 @@ def main() -> None:
         print(f"  rms(Bn/B) final = {float(rms1):.3e}")
         print(f"  max|Bn/B| final = {float(max1):.3e}")
         print("Target threshold: max|Bn/B| < 5e-3 (0.5%)")
+        if float(max1) > 5e-3:
+            print("Tip: increase --n-steps (e.g. 200+) and/or run the regularization scan to pick reg_K.")
 
         if int(args.val_surf_n_theta) > 0 and int(args.val_surf_n_phi) > 0:
             print(
@@ -825,8 +868,8 @@ def main() -> None:
 
     # ---- electrode model below ----
 
-    # Precompute background field at the evaluation points.
-    B_bg = ideal_toroidal_field(eval_points, B0=args.B0, R0=args.R0)
+    # Precompute background field at the evaluation points (for electrode model).
+    B_bg = tokamak_like_field(eval_points, B_tor0=float(args.B0), B_pol0=float(args.Bpol0), R0=float(args.R0))
     ratio_bg, ratio_bg_rms, ratio_bg_max = bn_over_B_metrics(B_bg, normals, weights)
 
     if args.current_scale is None:
@@ -847,7 +890,7 @@ def main() -> None:
     print("Optimization setup")
     print(f"  electrodes: n={args.n_sources}  sigma_theta={args.sigma_theta} sigma_phi={args.sigma_phi}")
     print(f"  objective:  minimize area-weighted <(Bn/|B|)^2> on target surface")
-    print(f"  background: ideal toroidal B0={args.B0} T at R0={args.R0}")
+    print(f"  background: tokamak-like 1/R field  Btor0={args.B0}T  Bpol0={args.Bpol0}T at R0={args.R0}")
     print(f"  current_scale: {args.current_scale:.6e} A per unit(currents_raw)")
     print(f"  optim:      steps={args.n_steps} lr={args.lr} regI={args.reg_currents} regPos={args.reg_positions}")
     print(f"  cg:         tol={args.cg_tol} maxiter={args.cg_maxiter} preconditioner={bool(args.use_preconditioner)}")
@@ -975,9 +1018,9 @@ def main() -> None:
     )
 
     def B_total_from_K(K, pts):
-        return ideal_toroidal_field(pts, B0=args.B0, R0=args.R0) + biot_savart_surface(
-            surface, K, pts, eps=float(args.biot_savart_eps)
-        )
+        return tokamak_like_field(
+            pts, B_tor0=float(args.B0), B_pol0=float(args.Bpol0), R0=float(args.R0)
+        ) + biot_savart_surface(surface, K, pts, eps=float(args.biot_savart_eps))
 
     B0_tot = B_total_from_K(K0, eval_points)
     B1_tot = B_total_from_K(K1, eval_points)
@@ -1000,9 +1043,9 @@ def main() -> None:
         seeds = jnp.stack([R_seed, jnp.zeros_like(R_seed), Z_seed], axis=-1)
 
         def B_fn(xyz_pts: jnp.ndarray) -> jnp.ndarray:
-            return ideal_toroidal_field(xyz_pts, B0=args.B0, R0=args.R0) + biot_savart_surface(
-                surface, K1, xyz_pts, eps=float(args.biot_savart_eps)
-            )
+            return tokamak_like_field(
+                xyz_pts, B_tor0=float(args.B0), B_pol0=float(args.Bpol0), R0=float(args.R0)
+            ) + biot_savart_surface(surface, K1, xyz_pts, eps=float(args.biot_savart_eps))
 
         traj = jax.jit(
             lambda x0: trace_field_lines_batch(
