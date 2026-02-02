@@ -258,6 +258,8 @@ def main() -> None:
     print(f"  final_rms_T={float(rms):.6e}")
     print(f"  currents: mean={float(jnp.mean(currents)):+.3e} A  rms={float(jnp.sqrt(jnp.mean(currents**2))):.3e} A")
     print(f"  currents: min={float(jnp.min(currents)):+.3e} A  max={float(jnp.max(currents)):+.3e} A")
+    if float(args.Bext0) != 0.0:
+        print(f"  fieldlines: include external ideal toroidal field Bext0={args.Bext0} T at R=R0")
 
     need_surface_fields = (not args.no_plots) or (not args.no_paraview)
     if need_surface_fields:

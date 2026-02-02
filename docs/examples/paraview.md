@@ -39,6 +39,8 @@ Exact content depends on the script, but common blocks include:
 - `fieldlines*.vtu`
   - Polyline cells representing traced field lines
   - Often includes `line_id` and `s_index` as point data for coloring
+  - Some examples optionally superpose an external ideal toroidal field $B_\phi\propto 1/R$ in the tracer.
+    In that case, the exported field lines correspond to the *total* field used for tracing.
 
 ## Recommended ParaView workflow
 
@@ -54,4 +56,3 @@ Exact content depends on the script, but common blocks include:
 
 - Outputs are intended to be **lightweight, portable, and scriptable**.
 - The interactive GUIs use VTK for rendering; the exporters do **not** require `vtk` to be installed.
-

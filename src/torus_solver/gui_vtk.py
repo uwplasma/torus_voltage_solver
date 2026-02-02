@@ -1545,7 +1545,13 @@ class TorusCutVoltageGUI:  # pragma: no cover
         act = jnp.asarray(self.active)
 
         V_vis, s, Kmag, Ktheta, Kphi, traj, Iproj = self._compute_jit(
-            th, ph, Iraw, act, jnp.asarray(self.V_cut), jnp.asarray(self.show_fieldlines)
+            th,
+            ph,
+            Iraw,
+            act,
+            jnp.asarray(self.V_cut),
+            jnp.asarray(self.include_bg_field),
+            jnp.asarray(self.show_fieldlines),
         )
         V_vis.block_until_ready()
         t1 = time.perf_counter()
@@ -1715,6 +1721,15 @@ class TorusCutVoltageGUI:  # pragma: no cover
                 self.update_solution()
                 return
             self.field_actor.SetVisibility(False)
+        elif key_sym in ("b", "B"):
+            self.include_bg_field = not self.include_bg_field
+            print(
+                f"External toroidal field (1/R): {'ON' if self.include_bg_field else 'OFF'} "
+                f"(Bext0={float(self.cfg.Bext0):.3g} T at R0={self.cfg.R0:g} m)"
+            )
+            if self.show_fieldlines:
+                self.update_solution()
+                return
         elif key_sym in ("r", "R"):
             self.update_solution()
             return
@@ -1903,6 +1918,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
 
         # Background field control.
         self.B0 = float(cfg.B0)
+        self.trace_include_bg = bool(cfg.trace_include_bg_default_on)
 
         # Scaling: I_phys = current_scale * currents_raw (then projected to net-zero over active electrodes).
         self.auto_current_scale = cfg.current_scale is None
@@ -2041,6 +2057,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         current_scale: jnp.ndarray,
         sigma_s: jnp.ndarray,
         reg_currents: jnp.ndarray,
+        trace_include_bg: jnp.ndarray,
         compute_traj: jnp.ndarray,
     ):
         # Project currents to net-zero over active electrodes (in raw units).
@@ -2090,9 +2107,11 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
         I_rms = jnp.sqrt(jnp.mean(I * I))
 
         def B_fn(xyz: jnp.ndarray) -> jnp.ndarray:
-            return ideal_toroidal_field(xyz, B0=B0, R0=self.cfg.R0) + biot_savart_surface(
-                self.surface, K, xyz, eps=self.cfg.biot_savart_eps
+            B = biot_savart_surface(self.surface, K, xyz, eps=self.cfg.biot_savart_eps)
+            B = B + jnp.asarray(trace_include_bg, dtype=B.dtype) * ideal_toroidal_field(
+                xyz, B0=B0, R0=self.cfg.R0
             )
+            return B
 
         n_steps = self.cfg.fieldline_steps
         n_lines = self.cfg.n_fieldlines
@@ -2163,6 +2182,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
                 current_scale,
                 sigma_s,
                 reg_currents,
+                jnp.asarray(True),
                 jnp.asarray(False),
             )
         )
@@ -2410,6 +2430,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
             "  tab: cycle selected\n"
             "  c: cycle torus scalar (|K|, V, s, Kθ, Kφ)\n"
             "  f: toggle field lines\n"
+            "  t: toggle include background field in field lines\n"
             "  r: recompute\n"
             "  e: export ParaView (.vtu/.vtm)\n"
             "  i (or v): type selected electrode current [A]\n"
@@ -2446,12 +2467,13 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
             )
 
         auto_txt = "auto" if self.auto_current_scale else "manual"
+        trace_bg = "ON" if self.trace_include_bg else "OFF"
         return (
             f"Active electrodes: {n_active}/{self.N}   optimize_positions={self.optimize_positions}\n"
             f"Selected: {sel_txt}\n"
             f"Mode: {self.mode}\n"
             f"Torus scalar: {self.scalar_name}   Target scalar: (B·n)/|B|\n"
-            f"B0={self.B0:.6g} T   current_scale={self.current_scale:.3e} A/unit ({auto_txt})\n"
+            f"B0={self.B0:.6g} T   current_scale={self.current_scale:.3e} A/unit ({auto_txt})   trace_bg={trace_bg}\n"
             f"lr={self.lr:.3e}   steps_per_opt={self.steps_per_opt}   reg_currents={self.reg_currents:.3e}   sigma_s={self.sigma_s:.3e}\n"
             + metric_lines
         )
@@ -2578,6 +2600,7 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
             jnp.asarray(self.current_scale, dtype=jnp.float64),
             jnp.asarray(self.sigma_s, dtype=jnp.float64),
             jnp.asarray(self.reg_currents, dtype=jnp.float64),
+            jnp.asarray(self.trace_include_bg),
             jnp.asarray(self.show_fieldlines),
         )
         V.block_until_ready()
@@ -2864,6 +2887,12 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
                 self.update_solution()
                 return
             self.field_actor.SetVisibility(False)
+        elif key_sym in ("t", "T"):
+            self.trace_include_bg = not self.trace_include_bg
+            print(f"Fieldline tracing background field: {'ON' if self.trace_include_bg else 'OFF'} (B0={self.B0:.6g} T)")
+            if self.show_fieldlines:
+                self.update_solution()
+                return
         elif key_sym in ("r", "R"):
             self.update_solution()
             return

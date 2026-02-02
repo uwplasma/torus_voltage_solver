@@ -349,6 +349,11 @@ From the repo root (`torus_voltage_solver/`):
   python examples/1_simple/jax_vs_numpy_biot_savart_speed.py --n-eval 512 --repeat 20
   ```
 
+- External ideal toroidal field (B ~ 1/R) field-line tracing:
+  ```bash
+  python examples/1_simple/external_toroidal_fieldlines.py
+  ```
+
 ## Benchmarks
 
 From the repo root (`torus_voltage_solver/`):

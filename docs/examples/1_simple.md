@@ -24,6 +24,35 @@ Outputs:
 - `figures/tokamak_like_fieldlines/traj/fieldline_3d.png`
 - `figures/tokamak_like_fieldlines/paraview/scene.vtm`
 
+## External ideal toroidal field lines (B ~ 1/R)
+
+Script:
+
+- `examples/1_simple/external_toroidal_fieldlines.py`
+
+This traces multiple field lines in a *pure* external ideal toroidal field:
+
+$$
+\mathbf B_\mathrm{ext}(R) = B_0\frac{R_0}{R}\,\hat{\mathbf e}_\phi,
+$$
+
+so the exact field lines should be circular rings at constant $(R,Z)$.
+
+```bash
+python examples/1_simple/external_toroidal_fieldlines.py
+```
+
+Key inputs:
+
+- `--B0` (Tesla): sets the background magnitude at `R=R0`.
+- `--R0`, `--rho`, `--n-lines`, `--fieldline-steps`, `--fieldline-ds`.
+
+Outputs:
+
+- `figures/external_toroidal_fieldlines/fieldlines/fieldlines_3d.png`
+- `figures/external_toroidal_fieldlines/field/Bmag_vs_R.png`
+- `figures/external_toroidal_fieldlines/paraview/scene.vtm`
+
 ## Shell current sheet → toroidal field
 
 Script:
@@ -91,4 +120,3 @@ Outputs include:
 
 - a timing figure
 - `figures/jax_vs_numpy_biot_savart_speed/paraview/scene.vtm`
-

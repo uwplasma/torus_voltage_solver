@@ -23,6 +23,11 @@ $$
 python examples/2_intermediate/optimize_helical_axis_field.py --n-steps 200
 ```
 
+Optional background field (for *field-line tracing only*):
+
+- `--Bext0 <Tesla>` adds an external ideal toroidal field $B_\phi \propto 1/R$ to the traced field lines
+  (and the corresponding ParaView `fieldlines_final.vtu`). Use `--Bext0 0` to disable.
+
 Outputs include:
 
 - surface maps (`V`, `s`, `|K|`, components)
@@ -50,6 +55,7 @@ Key points:
 
 - red electrodes are **sources** (+I), blue are **sinks** (−I)
 - press `E` to export the current state to `paraview/gui_torus_electrodes_<timestamp>/scene.vtm`
+- press `B` to toggle adding an external ideal toroidal field ($B_\phi\propto 1/R$) to the traced field lines
 
 ## GUI demos
 
@@ -59,4 +65,3 @@ These are “preloaded” starting points:
 - `examples/2_intermediate/gui_torus_demo_inboard_cut.py`
 
 They are useful for quickly seeing a nontrivial configuration without manually placing electrodes.
-

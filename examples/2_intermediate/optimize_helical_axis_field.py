@@ -139,6 +139,8 @@ def main() -> None:
         print(f"  optim:   method=lbfgs maxiter={args.n_steps} tol={args.lbfgs_tol}")
     else:
         print(f"  optim:   method=adam n_steps={args.n_steps} lr={args.lr}")
+    if float(args.Bext0) != 0.0:
+        print(f"  fieldlines: include external ideal toroidal field Bext0={args.Bext0} T at R=R0")
 
     B_init = forward_B(
         surface,

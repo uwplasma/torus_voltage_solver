@@ -84,6 +84,11 @@ This is a deliberately simplified construction inspired by near-axis intuition:
 python examples/3_advanced/optimize_bumpy_axis_rotating_ellipse.py --n-steps 120
 ```
 
+Optional background field (for *field-line tracing only*):
+
+- `--Bext0 <Tesla>` adds an external ideal toroidal field $B_\phi \propto 1/R$ to the traced field lines
+  (and the ParaView `fieldlines_final.vtu`). Use `--Bext0 0` to disable.
+
 Outputs include:
 
 - target-geometry diagnostics
@@ -103,3 +108,7 @@ python examples/3_advanced/gui_optimize_vmec_surface_Bn.py --vmec-input examples
 
 Press `E` to export the current state to ParaView.
 
+Field-line background toggle:
+
+- press `T` to toggle including the background $B_\phi\propto 1/R$ field in **field-line tracing** (visualization only).
+  The optimization objective and the displayed target-surface `(B·n)/|B|` use the configured `B0` regardless.
