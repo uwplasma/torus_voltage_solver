@@ -178,6 +178,34 @@ def _require_vtk() -> None:  # pragma: no cover
         ) from _vtk_import_error
 
 
+def _setup_text_actor(
+    actor, *, x: float, y: float, font_size: int = 16, top: bool = True
+) -> None:  # pragma: no cover
+    """Configure a vtkTextActor for robust visibility on HiDPI / resized windows.
+
+    We anchor text using normalized viewport coordinates so it stays on-screen even
+    when the window is resized or when Cocoa/Retina scaling is active.
+    """
+    prop = actor.GetTextProperty()
+    prop.SetFontSize(int(font_size))
+    prop.SetColor(0.0, 0.0, 0.0)
+    prop.SetJustificationToLeft()
+    if top:
+        prop.SetVerticalJustificationToTop()
+    else:
+        prop.SetVerticalJustificationToBottom()
+
+    # Normalized viewport coordinates: (0,0)=bottom-left, (1,1)=top-right.
+    actor.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
+    actor.SetPosition(float(x), float(y))
+
+    # Keep pixel-based font size rather than scaling with viewport (if supported).
+    try:
+        actor.SetTextScaleModeToNone()
+    except Exception:
+        pass
+
+
 def _resolve_vmec_input_path(vmec_input: str) -> Path:
     p = Path(vmec_input)
     if p.exists():
@@ -462,16 +490,12 @@ class TorusElectrodeGUI:  # pragma: no cover
 
         # Text overlay (help + status).
         self.text = vtk.vtkTextActor()
-        self.text.GetTextProperty().SetFontSize(16)
-        self.text.GetTextProperty().SetColor(0.0, 0.0, 0.0)
-        self.text.SetPosition(12, self.cfg.window_size[1] - 190)
+        _setup_text_actor(self.text, x=0.01, y=0.99, font_size=16, top=True)
         self.renderer.AddActor2D(self.text)
 
         # Editable numeric "textbox".
         self.input_text = vtk.vtkTextActor()
-        self.input_text.GetTextProperty().SetFontSize(16)
-        self.input_text.GetTextProperty().SetColor(0.0, 0.0, 0.0)
-        self.input_text.SetPosition(12, 12)
+        _setup_text_actor(self.input_text, x=0.01, y=0.01, font_size=16, top=False)
         self.renderer.AddActor2D(self.input_text)
 
         # Current slider for the selected electrode.
@@ -1243,15 +1267,11 @@ class TorusCutVoltageGUI:  # pragma: no cover
 
         # Text overlays: help+status (top) and an editable numeric "textbox" (bottom).
         self.text = vtk.vtkTextActor()
-        self.text.GetTextProperty().SetFontSize(16)
-        self.text.GetTextProperty().SetColor(0.0, 0.0, 0.0)
-        self.text.SetPosition(12, self.cfg.window_size[1] - 210)
+        _setup_text_actor(self.text, x=0.01, y=0.99, font_size=16, top=True)
         self.renderer.AddActor2D(self.text)
 
         self.input_text = vtk.vtkTextActor()
-        self.input_text.GetTextProperty().SetFontSize(16)
-        self.input_text.GetTextProperty().SetColor(0.0, 0.0, 0.0)
-        self.input_text.SetPosition(12, 12)
+        _setup_text_actor(self.input_text, x=0.01, y=0.01, font_size=16, top=False)
         self.renderer.AddActor2D(self.input_text)
 
         # V_cut slider.
@@ -2353,16 +2373,12 @@ class TorusVmecBnOptimizeGUI:  # pragma: no cover
 
         # Text overlay (help + status).
         self.text = vtk.vtkTextActor()
-        self.text.GetTextProperty().SetFontSize(16)
-        self.text.GetTextProperty().SetColor(0.0, 0.0, 0.0)
-        self.text.SetPosition(12, self.cfg.window_size[1] - 240)
+        _setup_text_actor(self.text, x=0.01, y=0.99, font_size=16, top=True)
         self.renderer.AddActor2D(self.text)
 
         # Editable numeric "textbox".
         self.input_text = vtk.vtkTextActor()
-        self.input_text.GetTextProperty().SetFontSize(16)
-        self.input_text.GetTextProperty().SetColor(0.0, 0.0, 0.0)
-        self.input_text.SetPosition(12, 12)
+        _setup_text_actor(self.input_text, x=0.01, y=0.01, font_size=16, top=False)
         self.renderer.AddActor2D(self.input_text)
 
         # Current slider for the selected electrode (physical A).
