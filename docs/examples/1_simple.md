@@ -59,10 +59,10 @@ Script:
 
 - `examples/1_simple/shell_toroidal_fieldlines.py`
 
-This prescribes a **uniform poloidal surface current density** $K_\\theta$ on the winding surface. In the thin-shell limit, this produces an approximately toroidal field
+This prescribes a **uniform poloidal surface current density** $K_\theta$ on the winding surface. In the thin-shell limit, this produces an approximately toroidal field
 
 $$
-B_\\phi(R) \\approx \\mu_0 K_\\theta \\frac{R_0}{R}.
+B_\phi(R) \approx \mu_0 K_\theta \frac{R_0}{R}.
 $$
 
 ```bash
@@ -80,13 +80,13 @@ Script:
 
 - `examples/1_simple/inboard_cut_toroidal_field.py`
 
-A single-valued scalar potential cannot drive a net poloidal loop current on a torus. This script introduces a **toroidal cut**, allowing a **multi-valued** potential with a prescribed voltage drop $V_\\mathrm{cut}$ across the cut.
+A single-valued scalar potential cannot drive a net poloidal loop current on a torus. This script introduces a **toroidal cut**, allowing a **multi-valued** potential with a prescribed voltage drop $V_\mathrm{cut}$ across the cut.
 
-In the axisymmetric (no-$\\phi$-dependence) cut-driven case with $s=0$,
+In the axisymmetric (no-$\phi$-dependence) cut-driven case with $s=0$,
 
 $$
-\\partial_\\theta V = \\frac{C}{R(\\theta)}, \\qquad
-V_\\mathrm{cut} = \\oint \\partial_\\theta V\\, d\\theta,
+\partial_\theta V = \frac{C}{R(\theta)}, \qquad
+V_\mathrm{cut} = \oint \partial_\theta V\, d\theta,
 $$
 
 which fixes the constant $C$.
@@ -98,7 +98,7 @@ python examples/1_simple/inboard_cut_toroidal_field.py --trace
 Outputs include:
 
 - a visualization of the cut (where the potential jumps)
-- midplane $B_\\phi(R)$ vs $1/R$ comparison
+- midplane $B_\phi(R)$ vs $1/R$ comparison
 - `figures/inboard_cut_toroidal_field/paraview/scene.vtm`
 
 ## JAX vs NumPy: Biot–Savart timing

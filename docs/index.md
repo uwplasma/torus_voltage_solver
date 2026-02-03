@@ -35,6 +35,7 @@ Regularization scan (“L-curve”-style): tradeoff between current magnitude ($
 :caption: Getting Started
 
 getting-started
+inputs-and-outputs
 installation
 examples/index
 applications
@@ -74,6 +75,7 @@ api/index
 :caption: Development
 
 development/contributing
+development/testing
 development/ci-cd
 development/roadmap
 references

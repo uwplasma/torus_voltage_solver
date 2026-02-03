@@ -12,12 +12,44 @@ Script:
 
 This example chooses a set of axis points and a simple helical “stellarator-like” target field, then optimizes discrete source/sink electrodes on the winding surface to match the target.
 
-The objective is a weighted least squares:
+### Model and objective
+
+The electrode model solves a surface Poisson problem to obtain the surface potential and current:
 
 $$
-L = \\left\\langle \\frac{\\|B(\\mathbf x_i) - B_{\\mathrm{target}}(\\mathbf x_i)\\|^2}{B_{\\mathrm{scale}}^2} \\right\\rangle
-\\; + \\; \\text{regularization}.
+-\Delta_s V = \frac{s}{\sigma_s},\qquad
+\mathbf K = -\sigma_s \nabla_s V.
 $$
+
+The sources/sinks are modeled as smooth periodic kernels that integrate to the injected currents:
+
+$$
+s(\theta,\phi)=\sum_i I_i\,w_i(\theta,\phi),\qquad
+\iint w_i\,dA = 1.
+$$
+
+Given $\mathbf K(\theta,\phi)$, the vacuum magnetic field is computed with Biot–Savart:
+
+$$
+\mathbf B(\mathbf x)=\frac{\mu_0}{4\pi}\iint \frac{\mathbf K(\mathbf r')\times (\mathbf x-\mathbf r')}{\|\mathbf x-\mathbf r'\|^3}\,dA'.
+$$
+
+The objective is a weighted least squares mismatch to a prescribed target field on a set of axis points $\mathbf x_i$:
+
+$$
+L = \left\langle \frac{\|\mathbf B(\mathbf x_i) - \mathbf B_{\mathrm{target}}(\mathbf x_i)\|^2}{B_{\mathrm{scale}}^2} \right\rangle
+\;+\; \text{regularization}.
+$$
+
+In this example, the target is a simple “helical” pattern:
+
+$$
+\mathbf B_{\mathrm{target}}(\phi) =
+B_0\,\hat{\mathbf e}_\phi
+ + B_1\left[\cos(N_{\mathrm{fp}}\phi)\,\hat{\mathbf e}_R + \sin(N_{\mathrm{fp}}\phi)\,\hat{\mathbf e}_Z\right],
+$$
+
+evaluated on the magnetic axis $R=R_0$, $Z=0$.
 
 ```bash
 python examples/2_intermediate/optimize_helical_axis_field.py --n-steps 200
@@ -27,7 +59,7 @@ Optional background field (for *field-line tracing only*):
 
 - `--Bext0 <Tesla>` adds an external ideal toroidal field $B_\phi = B_{\mathrm{ext0}} (R_0/R)$ to the traced field lines.
 - `--Bpol0 <Tesla>` adds an external tokamak-like poloidal component
-  $B_\\theta = B_{\\mathrm{pol0}} (R_0/R)$ to the traced field lines.
+  $B_\theta = B_{\mathrm{pol0}} (R_0/R)$ to the traced field lines.
 
 Use `--Bext0 0 --Bpol0 0` to disable.
 
@@ -58,8 +90,8 @@ Key points:
 
 - red electrodes are **sources** (+I), blue are **sinks** (−I)
 - press `E` to export the current state to `paraview/gui_torus_electrodes_<timestamp>/scene.vtm`
-- press `B` to toggle adding an external toroidal field ($B_\phi\\propto 1/R$) to the traced field lines
-- press `P` to toggle adding an external poloidal field ($B_\\theta\\propto 1/R$) to the traced field lines
+- press `B` to toggle adding an external toroidal field ($B_\phi\propto 1/R$) to the traced field lines
+- press `P` to toggle adding an external poloidal field ($B_\theta\propto 1/R$) to the traced field lines
 - press `[`/`]` to decrease/increase `Bext0`, and `,`/`.` to decrease/increase `Bpol0`
 
 ## GUI demos
