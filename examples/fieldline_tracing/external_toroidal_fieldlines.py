@@ -18,7 +18,7 @@ coordinates. This makes it a clean sanity check for:
   - the 1/R magnitude scaling
 
 Run:
-  python examples/1_simple/external_toroidal_fieldlines.py
+  python examples/fieldline_tracing/external_toroidal_fieldlines.py
 """
 
 from __future__ import annotations
@@ -192,4 +192,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

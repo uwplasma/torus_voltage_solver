@@ -48,7 +48,7 @@ Key validations include:
   - For an axisymmetric toroidal field, $B_n/|B|$ should be ~0 on an interior torus and should
     decrease as the winding-surface resolution increases.
   - Unit test: `tests/test_validation_physics.py`
-  - Example sweep + plots: `examples/1_simple/convergence_bn_over_B_toroidal_current.py`
+  - Example sweep + plots: `examples/validation/convergence_bn_over_B_toroidal_current.py`
 
 - **Sensitivity checks (autodiff gradients vs finite differences)**:
   - Small problems validate JAX gradients against central finite differences for both:

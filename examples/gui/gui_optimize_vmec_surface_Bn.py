@@ -2,7 +2,7 @@
 """Interactive GUI: optimize electrode sources/sinks to reduce (B·n)/|B| on a VMEC surface.
 
 Run:
-  python examples/3_advanced/gui_optimize_vmec_surface_Bn.py --vmec-input examples/data/vmec/input.QA_nfp2
+  python examples/gui/gui_optimize_vmec_surface_Bn.py --vmec-input examples/data/vmec/input.QA_nfp2
 """
 
 from __future__ import annotations

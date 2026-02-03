@@ -20,7 +20,7 @@ We compute K on a grid, evaluate B via Biot–Savart at interior points, and com
 toroidal component against the ideal 1/R scaling shape.
 
 Run (from `torus_solver/`):
-  python examples/1_simple/inboard_cut_toroidal_field.py --trace
+  python examples/fieldline_tracing/inboard_cut_toroidal_field.py --trace
 """
 
 from __future__ import annotations

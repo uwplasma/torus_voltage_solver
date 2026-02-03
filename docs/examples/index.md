@@ -1,10 +1,12 @@
 # Examples
 
-All runnable scripts live under `examples/` and are split into three tiers:
+All runnable scripts live under `examples/` and are grouped by *what you want to do*:
 
-- `examples/1_simple/`: minimal, analytic, or near-analytic demonstrations
-- `examples/2_intermediate/`: optimization workflows and interactive intuition-builders
-- `examples/3_advanced/`: VMEC targets, regularization scans, and more research-style scripts
+- `examples/fieldline_tracing/`: trace field lines in analytic and simple Biot–Savart fields
+- `examples/validation/`: convergence / analytic checks (build trust in the numerics)
+- `examples/inverse_design/`: optimization workflows (inverse problems)
+- `examples/gui/`: interactive VTK GUIs
+- `examples/performance/`: speed/scaling demos (JAX vs NumPy)
 
 ## Outputs (figures + ParaView)
 
@@ -38,8 +40,10 @@ The export path is:
 ```{toctree}
 :maxdepth: 1
 
-1_simple
-2_intermediate
-3_advanced
+fieldline_tracing
+validation
+inverse_design
+gui
+performance
 paraview
 ```

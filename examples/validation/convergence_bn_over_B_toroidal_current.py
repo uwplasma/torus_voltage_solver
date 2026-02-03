@@ -26,7 +26,7 @@ We sweep winding-surface resolution and monitor:
         B_phi(R) ≈ μ0 I_pol / (2π R)
 
 Run:
-  python examples/1_simple/convergence_bn_over_B_toroidal_current.py
+  python examples/validation/convergence_bn_over_B_toroidal_current.py
 """
 
 from __future__ import annotations
@@ -273,4 +273,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

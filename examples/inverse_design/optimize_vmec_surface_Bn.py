@@ -19,7 +19,7 @@ Important notes:
   - The VMEC boundary is shifted/scaled (if needed) so it fits inside the circular torus.
 
 Run:
-  python examples/3_advanced/optimize_vmec_surface_Bn.py --vmec-input examples/data/vmec/input.QA_nfp2
+  python examples/inverse_design/optimize_vmec_surface_Bn.py --vmec-input examples/data/vmec/input.QA_nfp2
 """
 
 from __future__ import annotations

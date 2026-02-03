@@ -12,7 +12,7 @@ The continuation strategy (warm-starting each solve from the previous solution)
 is commonly used in coil/current-potential design workflows.
 
 Run:
-  python examples/3_advanced/scan_vmec_surface_regularization.py --vmec-input examples/data/vmec/input.QA_nfp2
+  python examples/inverse_design/scan_vmec_surface_regularization.py --vmec-input examples/data/vmec/input.QA_nfp2
 """
 
 from __future__ import annotations

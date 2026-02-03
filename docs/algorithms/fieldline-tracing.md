@@ -35,7 +35,7 @@ Even if a surface has small $B_n/|B|$, field lines may still drift away dependin
 - numerical integration step size
 - whether the objective enforced tangency only at discrete points
 
-In `examples/3_advanced/optimize_vmec_surface_Bn.py`, a simple drift diagnostic measures the distance of traced points to a discrete point cloud of the target surface.
+In `examples/inverse_design/optimize_vmec_surface_Bn.py`, a simple drift diagnostic measures the distance of traced points to a discrete point cloud of the target surface.
 
 :::{tip}
 When diagnosing drift, always check convergence with smaller step sizes and compare multiple seeds.

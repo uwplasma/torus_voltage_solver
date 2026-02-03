@@ -35,9 +35,9 @@ From the repo root (`torus_voltage_solver/`):
 
 ```bash
 pytest -q
-python examples/1_simple/tokamak_like_fieldlines.py
-python examples/3_advanced/optimize_vmec_surface_Bn.py --model current-potential --vmec-input examples/data/vmec/input.QA_nfp2
-python examples/3_advanced/scan_vmec_surface_regularization.py --vmec-input examples/data/vmec/input.QA_nfp2
+python examples/fieldline_tracing/tokamak_like_fieldlines.py
+python examples/inverse_design/optimize_vmec_surface_Bn.py --model current-potential --vmec-input examples/data/vmec/input.QA_nfp2
+python examples/inverse_design/scan_vmec_surface_regularization.py --vmec-input examples/data/vmec/input.QA_nfp2
 ```
 
 :::{tip}

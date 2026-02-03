@@ -33,9 +33,9 @@ From the repo root (`torus_voltage_solver/`):
 
 ```bash
 pytest -q
-python examples/1_simple/tokamak_like_fieldlines.py
-python examples/2_intermediate/optimize_helical_axis_field.py --n-steps 50
-python examples/3_advanced/scan_vmec_surface_regularization.py --vmec-input examples/data/vmec/input.QA_nfp2
+python examples/fieldline_tracing/tokamak_like_fieldlines.py
+python examples/inverse_design/optimize_helical_axis_field.py --n-steps 50
+python examples/inverse_design/scan_vmec_surface_regularization.py --vmec-input examples/data/vmec/input.QA_nfp2
 ```
 
 ## Gallery
@@ -281,11 +281,11 @@ From the repo root (`torus_voltage_solver/`):
   - Run:
     ```bash
     # Electrode-current GUI (click to add/move sources/sinks, slider sets current):
-    python examples/2_intermediate/gui_torus_electrodes_interactive.py
-    python examples/2_intermediate/gui_torus_demo_helical.py
+    python examples/gui/gui_torus_electrodes_interactive.py
+    python examples/gui/gui_torus_demo_helical.py
 
     # Cut-voltage GUI (slider sets V_cut across a toroidal cut, driving poloidal current):
-    python examples/2_intermediate/gui_torus_demo_inboard_cut.py
+    python examples/gui/gui_torus_demo_inboard_cut.py
     ```
   - Electrode-current GUI key bindings (also shown in the GUI):
     - `a`: add source (next click on surface)
@@ -321,54 +321,54 @@ From the repo root (`torus_voltage_solver/`):
 
 - Helical on-axis target optimization:
   ```bash
-  python examples/2_intermediate/optimize_helical_axis_field.py --n-steps 200
+  python examples/inverse_design/optimize_helical_axis_field.py --n-steps 200
   ```
 
 - Electrode-driven “inboard cut” that produces a toroidal ~1/R field (non-GUI):
   ```bash
-  python examples/1_simple/inboard_cut_toroidal_field.py --trace
+  python examples/fieldline_tracing/inboard_cut_toroidal_field.py --trace
   ```
 
 - Rotating ellipse around a bumpy axis (toy near-axis target):
   ```bash
-  python examples/3_advanced/optimize_bumpy_axis_rotating_ellipse.py --R0 3.0 --a 1.0 --n-steps 120
+  python examples/inverse_design/optimize_bumpy_axis_rotating_ellipse.py --R0 3.0 --a 1.0 --n-steps 120
   ```
 
 - VMEC-surface normal-field minimization (prototype REGCOIL-like objective):
   ```bash
-  python examples/3_advanced/optimize_vmec_surface_Bn.py --model current-potential --vmec-input examples/data/vmec/input.QA_nfp2
+  python examples/inverse_design/optimize_vmec_surface_Bn.py --model current-potential --vmec-input examples/data/vmec/input.QA_nfp2
   ```
 
 - Interactive VMEC optimization GUI (electrodes on a circular torus, target VMEC surface):
   ```bash
-  python examples/3_advanced/gui_optimize_vmec_surface_Bn.py --vmec-input examples/data/vmec/input.QA_nfp2
+  python examples/gui/gui_optimize_vmec_surface_Bn.py --vmec-input examples/data/vmec/input.QA_nfp2
   ```
   This GUI minimizes a p-norm objective of `(B·n)/|B|` on the target surface, and supports
   background toroidal/poloidal fields (for tracing) with `T`/`Y` and `[`/`]`, `,`/`.`.
 
 - REGCOIL-style regularization scan (tradeoff / “L-curve”):
   ```bash
-  python examples/3_advanced/scan_vmec_surface_regularization.py --vmec-input examples/data/vmec/input.QA_nfp2
+  python examples/inverse_design/scan_vmec_surface_regularization.py --vmec-input examples/data/vmec/input.QA_nfp2
   ```
 
 - Trace field lines in an analytic tokamak-like field:
   ```bash
-  python examples/1_simple/tokamak_like_fieldlines.py
+  python examples/fieldline_tracing/tokamak_like_fieldlines.py
   ```
 
 - Trace field lines in an analytic toroidal field and validate Biot–Savart along the trace:
   ```bash
-  python examples/1_simple/shell_toroidal_fieldlines.py
+  python examples/fieldline_tracing/shell_toroidal_fieldlines.py
   ```
 
 - JAX vs NumPy speed demo for Biot–Savart:
   ```bash
-  python examples/1_simple/jax_vs_numpy_biot_savart_speed.py --n-eval 512 --repeat 20
+  python examples/performance/jax_vs_numpy_biot_savart_speed.py --n-eval 512 --repeat 20
   ```
 
 - External ideal toroidal field (B ~ 1/R) field-line tracing:
   ```bash
-  python examples/1_simple/external_toroidal_fieldlines.py
+  python examples/fieldline_tracing/external_toroidal_fieldlines.py
   ```
 
 ## Benchmarks

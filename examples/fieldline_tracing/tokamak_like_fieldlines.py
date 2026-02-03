@@ -2,7 +2,7 @@
 """Example: trace field lines in an analytic tokamak-like 1/R field.
 
 Run:
-  - `python examples/1_simple/tokamak_like_fieldlines.py`
+  - `python examples/fieldline_tracing/tokamak_like_fieldlines.py`
 """
 
 from __future__ import annotations

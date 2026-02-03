@@ -35,7 +35,7 @@ $$
 \mathrm{BnOverB}(\theta,\phi) = \frac{\mathbf B(\theta,\phi)\cdot\hat{\mathbf n}(\theta,\phi)}{|\mathbf B(\theta,\phi)|}.
 $$
 
-The script `examples/3_advanced/optimize_vmec_surface_Bn.py` implements a REGCOIL-like optimization loop:
+The script `examples/inverse_design/optimize_vmec_surface_Bn.py` implements a REGCOIL-like optimization loop:
 
 1. Read a VMEC boundary surface (Fourier coefficients) from a `input.*` file.
 2. Scale that target surface to fit safely inside a circular torus (the winding surface).

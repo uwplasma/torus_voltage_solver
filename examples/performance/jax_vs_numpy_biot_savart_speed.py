@@ -13,7 +13,7 @@ We compare:
   - the JAX implementation `torus_solver.biot_savart_surface`, evaluated through a JIT-compiled function
 
 Run:
-  python examples/1_simple/jax_vs_numpy_biot_savart_speed.py
+  python examples/performance/jax_vs_numpy_biot_savart_speed.py
 """
 
 from __future__ import annotations

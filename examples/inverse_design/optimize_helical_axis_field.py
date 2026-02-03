@@ -1,16 +1,8 @@
 #!/usr/bin/env python3
-"""Example: target a rotating-ellipse, bumpy magnetic axis and optimize electrodes.
-
-This is a deliberately "toy near-axis" target:
-  - A bumpy magnetic axis is prescribed in cylindrical coordinates:
-        R(φ) = R_axis0 + dr * cos(nfp φ)
-        Z(φ) = dz * sin(nfp φ)
-  - A local Frenet-like frame (t,n,b) is built numerically along the axis.
-  - The target field is a mostly-tangent field with a rotating transverse component:
-        B_target = B0 t + B1 (cos(α) n + sin(α) b),  α = nfp φ + α0
+"""Example: optimize source/sink electrodes to reproduce a helical field on-axis.
 
 Run:
-  - `python examples/3_advanced/optimize_bumpy_axis_rotating_ellipse.py`
+  - `python examples/inverse_design/optimize_helical_axis_field.py`
 """
 
 from __future__ import annotations
@@ -32,11 +24,20 @@ import jax.numpy as jnp
 import numpy as np
 
 from torus_solver import make_torus_surface
-from torus_solver.optimize import SourceParams, forward_B, optimize_sources, surface_solution
+from torus_solver.optimize import (
+    SourceParams,
+    enforce_net_zero,
+    forward_B,
+    make_helical_axis_points,
+    optimize_sources,
+    optimize_sources_lbfgs,
+    surface_solution,
+)
 from torus_solver.paraview import fieldlines_to_vtu, point_cloud_to_vtu, torus_surface_to_vtu, write_vtm, write_vtu
 from torus_solver.plotting import (
     ensure_dir,
     plot_3d_torus,
+    plot_axis_field_comparison,
     plot_fieldlines_3d,
     plot_loss_history,
     plot_surface_map,
@@ -46,112 +47,30 @@ from torus_solver.plotting import (
 import torus_solver.plotting as tplot
 
 
-def _normalize(v: jnp.ndarray, eps: float = 1e-12) -> jnp.ndarray:
-    return v / (jnp.linalg.norm(v, axis=-1, keepdims=True) + eps)
-
-
-def bumpy_axis_points(
-    phi: jnp.ndarray, *, R_axis0: float, dr: float, dz: float, nfp: int
-) -> jnp.ndarray:
-    R = R_axis0 + dr * jnp.cos(nfp * phi)
-    Z = dz * jnp.sin(nfp * phi)
-    x = R * jnp.cos(phi)
-    y = R * jnp.sin(phi)
-    return jnp.stack([x, y, Z], axis=-1)
-
-
-def discrete_frenet_frame(points: jnp.ndarray, *, eps: float = 1e-12):
-    """Approximate (t,n,b) from a closed curve sampled uniformly in φ."""
-    dp = 0.5 * (jnp.roll(points, -1, axis=0) - jnp.roll(points, 1, axis=0))
-    t = _normalize(dp, eps=eps)
-
-    dt = 0.5 * (jnp.roll(t, -1, axis=0) - jnp.roll(t, 1, axis=0))
-    dt_perp = dt - jnp.sum(dt * t, axis=-1, keepdims=True) * t
-    n = _normalize(dt_perp, eps=eps)
-    b = _normalize(jnp.cross(t, n), eps=eps)
-    return t, n, b
-
-
-def make_target(
-    *,
-    R0: float,
-    a: float,
-    n_axis: int,
-    nfp: int,
-    dr_axis: float,
-    dz_axis: float,
-    B0: float,
-    B1: float,
-    alpha0: float,
-    ellipse_a: float,
-    ellipse_b: float,
-    n_psi: int,
-) -> tuple[jnp.ndarray, jnp.ndarray]:
-    phi = jnp.linspace(0.0, 2 * jnp.pi, n_axis, endpoint=False, dtype=jnp.float64)
-    axis = bumpy_axis_points(phi, R_axis0=R0, dr=dr_axis, dz=dz_axis, nfp=nfp)
-
-    t, n, b = discrete_frenet_frame(axis)
-    alpha = nfp * phi + alpha0
-    n_rot = jnp.cos(alpha)[:, None] * n + jnp.sin(alpha)[:, None] * b
-    b_rot = -jnp.sin(alpha)[:, None] * n + jnp.cos(alpha)[:, None] * b
-
-    # Evaluation points: a small rotating ellipse around the axis.
-    psi = jnp.linspace(0.0, 2 * jnp.pi, n_psi, endpoint=False, dtype=jnp.float64)
-    c = jnp.cos(psi)[None, :, None]
-    s = jnp.sin(psi)[None, :, None]
-    pts = axis[:, None, :] + ellipse_a * c * n_rot[:, None, :] + ellipse_b * s * b_rot[:, None, :]
-    eval_points = pts.reshape((-1, 3))
-
-    # Target field is specified on those points using the axis frame at each φ.
-    B_axis = B0 * t + B1 * n_rot
-    B_target = jnp.broadcast_to(B_axis[:, None, :], pts.shape).reshape((-1, 3))
-
-    # Debug info:
-    print("Target construction")
-    print(f"  axis: n_axis={n_axis} nfp={nfp} dr_axis={dr_axis} dz_axis={dz_axis}")
-    print(f"  ellipse: a={ellipse_a} b={ellipse_b} n_psi={n_psi} -> n_eval={eval_points.shape[0]}")
-    print(f"  |B_target| mean={float(jnp.mean(jnp.linalg.norm(B_target, axis=-1))):.3e}")
-
-    # Sanity check orthonormality at a few points.
-    dot_tn = jnp.mean(jnp.sum(t * n, axis=-1))
-    dot_tb = jnp.mean(jnp.sum(t * b, axis=-1))
-    dot_nb = jnp.mean(jnp.sum(n * b, axis=-1))
-    print(f"  frame dots mean: t·n={float(dot_tn):+.2e} t·b={float(dot_tb):+.2e} n·b={float(dot_nb):+.2e}")
-
-    return phi, axis, pts, B_target
-
-
 def main() -> None:
     jax.config.update("jax_enable_x64", True)
 
     p = argparse.ArgumentParser()
-    p.add_argument("--R0", type=float, default=3.0, help="Winding-surface major radius (m)")
-    p.add_argument("--a", type=float, default=1.0, help="Winding-surface minor radius (m)")
-    p.add_argument("--n-theta", type=int, default=40)
-    p.add_argument("--n-phi", type=int, default=40)
+    p.add_argument("--R0", type=float, default=3.0)
+    p.add_argument("--a", type=float, default=1.0)
+    p.add_argument("--n-theta", type=int, default=48)
+    p.add_argument("--n-phi", type=int, default=48)
+    p.add_argument("--n-points", type=int, default=32)
     p.add_argument("--n-sources", type=int, default=12)
-    p.add_argument("--n-steps", type=int, default=120)
-    p.add_argument("--lr", type=float, default=2e-2)
-
-    p.add_argument("--n-axis", type=int, default=16)
-    p.add_argument("--n-psi", type=int, default=6)
     p.add_argument("--nfp", type=int, default=2)
-    p.add_argument("--dr-axis", type=float, default=0.15, help="Axis radial bump amplitude (m)")
-    p.add_argument("--dz-axis", type=float, default=0.10, help="Axis vertical bump amplitude (m)")
-    p.add_argument("--ellipse-a", type=float, default=0.12, help="Rotating ellipse semi-axis a (m)")
-    p.add_argument("--ellipse-b", type=float, default=0.06, help="Rotating ellipse semi-axis b (m)")
-    p.add_argument("--alpha0", type=float, default=0.0)
-
-    p.add_argument("--B0", type=float, default=1e-4, help="Target field scale (T)")
-    p.add_argument("--B1", type=float, default=2.5e-5, help="Transverse component amplitude (T)")
-
+    p.add_argument("--B0", type=float, default=1e-4)
+    p.add_argument("--B1", type=float, default=None)
     p.add_argument("--sigma-theta", type=float, default=0.25)
     p.add_argument("--sigma-phi", type=float, default=0.25)
-    p.add_argument("--outdir", type=str, default="figures/optimize_bumpy_axis_rotating_ellipse")
+    p.add_argument("--optimizer", type=str, default="adam", choices=["adam", "lbfgs"])
+    p.add_argument("--lbfgs-tol", type=float, default=1e-9)
+    p.add_argument("--n-steps", type=int, default=200)
+    p.add_argument("--lr", type=float, default=1e-2)
+    p.add_argument("--outdir", type=str, default="figures/optimize_helical_axis_field")
     p.add_argument("--dpi", type=int, default=300)
     p.add_argument("--no-plots", action="store_true")
     p.add_argument("--no-paraview", action="store_true", help="Disable ParaView (.vtu/.vtm) outputs")
-    p.add_argument("--plot-stride", type=int, default=3)
+    p.add_argument("--plot-stride", type=int, default=3, help="Decimation stride for 3D torus wireframe")
     p.add_argument("--no-fieldlines", action="store_true", help="Disable final 3D field-line plot (faster)")
     p.add_argument("--n-fieldlines", type=int, default=12)
     p.add_argument("--fieldline-steps", type=int, default=500)
@@ -169,8 +88,10 @@ def main() -> None:
         default=0.0,
         help="Optional external poloidal background field at R=R0 [T] (tokamak-like 1/R; 0 disables).",
     )
-
     args = p.parse_args()
+
+    if args.B1 is None:
+        args.B1 = 0.25 * args.B0
 
     outdir = None
     if (not args.no_plots) or (not args.no_paraview):
@@ -178,7 +99,7 @@ def main() -> None:
         if not args.no_plots:
             set_plot_style()
             ensure_dir(outdir / "surface")
-            ensure_dir(outdir / "target")
+            ensure_dir(outdir / "axis")
             ensure_dir(outdir / "optim")
             ensure_dir(outdir / "geometry")
             ensure_dir(outdir / "fieldlines")
@@ -187,25 +108,17 @@ def main() -> None:
             ensure_dir(outdir / "paraview")
             print(f"Saving ParaView outputs to: {outdir / 'paraview'}")
 
-    print("Building winding surface (circular torus)")
-    print(f"  R0={args.R0} a={args.a} n_theta={args.n_theta} n_phi={args.n_phi}")
     surface = make_torus_surface(R0=args.R0, a=args.a, n_theta=args.n_theta, n_phi=args.n_phi)
 
-    phi_axis, axis_xyz, pts_ellipse, B_target = make_target(
-        R0=args.R0,
-        a=args.a,
-        n_axis=args.n_axis,
-        nfp=args.nfp,
-        dr_axis=args.dr_axis,
-        dz_axis=args.dz_axis,
-        B0=args.B0,
-        B1=args.B1,
-        alpha0=args.alpha0,
-        ellipse_a=args.ellipse_a,
-        ellipse_b=args.ellipse_b,
-        n_psi=args.n_psi,
+    # Target points on the magnetic axis (major-radius circle).
+    phi, points, e_r, e_phi, e_z = make_helical_axis_points(
+        R_axis=surface.R0, n_points=args.n_points
     )
-    eval_points = pts_ellipse.reshape((-1, 3))
+
+    # A toy stellarator-like target: toroidal + rotating (r,z) component.
+    B_target = args.B0 * e_phi + args.B1 * (
+        jnp.cos(args.nfp * phi)[:, None] * e_r + jnp.sin(args.nfp * phi)[:, None] * e_z
+    )
 
     key = jax.random.key(0)
     theta_src = 2 * jnp.pi * jax.random.uniform(key, (args.n_sources,))
@@ -213,67 +126,90 @@ def main() -> None:
     currents_raw = 1e3 * jax.random.normal(jax.random.fold_in(key, 2), (args.n_sources,))
     init = SourceParams(theta_src=theta_src, phi_src=phi_src, currents_raw=currents_raw)
 
-    # Evaluate initial loss.
-    B_init = forward_B(
-        surface,
-        init,
-        eval_points=eval_points,
-        sigma_theta=args.sigma_theta,
-        sigma_phi=args.sigma_phi,
-    )
-    rms0 = jnp.sqrt(jnp.mean(jnp.sum((B_init - B_target) ** 2, axis=-1)))
-    print(f"Initial RMS(B-Btgt) = {float(rms0):.6e} T")
+    sigma_theta = args.sigma_theta
+    sigma_phi = args.sigma_phi
 
     def cb(step: int, metrics: dict[str, float]) -> None:
-        if step % 20 == 0 or step == args.n_steps - 1:
+        if step % 25 == 0:
             print(
                 "step={:4d} loss={:.6e} loss_B={:.6e} loss_reg={:.3e} I_rms={:.3e} A".format(
                     step, metrics["loss"], metrics["loss_B"], metrics["loss_reg"], metrics["currents_rms"]
                 )
             )
 
-    t0 = time.perf_counter()
-    best, history = optimize_sources(
-        surface,
-        init=init,
-        eval_points=eval_points,
-        B_target=B_target,
-        B_scale=args.B0,
-        sigma_theta=args.sigma_theta,
-        sigma_phi=args.sigma_phi,
-        n_steps=args.n_steps,
-        lr=args.lr,
-        reg_currents=1e-12,
-        callback=cb,
-        return_history=True,
-    )
-    t1 = time.perf_counter()
-
-    B_final = forward_B(
-        surface,
-        best,
-        eval_points=eval_points,
-        sigma_theta=args.sigma_theta,
-        sigma_phi=args.sigma_phi,
-    )
-    rms = jnp.sqrt(jnp.mean(jnp.sum((B_final - B_target) ** 2, axis=-1)))
-
-    currents = best.currents_raw - jnp.mean(best.currents_raw)
-    print("Optimization done")
-    print(f"  wall_time_s={t1 - t0:.2f}")
-    print(f"  final_rms_T={float(rms):.6e}")
-    print(f"  currents: mean={float(jnp.mean(currents)):+.3e} A  rms={float(jnp.sqrt(jnp.mean(currents**2))):.3e} A")
-    print(f"  currents: min={float(jnp.min(currents)):+.3e} A  max={float(jnp.max(currents)):+.3e} A")
+    print("Helical target optimization")
+    print(f"  surface: R0={args.R0} a={args.a} n_theta={args.n_theta} n_phi={args.n_phi}")
+    print(f"  target:  nfp={args.nfp} B0={args.B0}T B1={args.B1}T n_points={args.n_points}")
+    print(f"  sources: n_sources={args.n_sources} sigma_theta={sigma_theta} sigma_phi={sigma_phi}")
+    if args.optimizer == "lbfgs":
+        print(f"  optim:   method=lbfgs maxiter={args.n_steps} tol={args.lbfgs_tol}")
+    else:
+        print(f"  optim:   method=adam n_steps={args.n_steps} lr={args.lr}")
     if float(args.Bext0) != 0.0 or float(args.Bpol0) != 0.0:
         print(
             "  fieldlines: include external background field at R=R0: "
             f"Bext0={args.Bext0} T, Bpol0={args.Bpol0} T"
         )
 
+    B_init = forward_B(
+        surface,
+        init,
+        eval_points=points,
+        sigma_theta=sigma_theta,
+        sigma_phi=sigma_phi,
+    )
+    rms0 = jnp.sqrt(jnp.mean(jnp.sum((B_init - B_target) ** 2, axis=-1)))
+    print(f"initial_rms={float(rms0):.6e} T")
+
+    t0 = time.perf_counter()
+    if args.optimizer == "lbfgs":
+        best, history = optimize_sources_lbfgs(
+            surface,
+            init=init,
+            eval_points=points,
+            B_target=B_target,
+            B_scale=args.B0,
+            sigma_theta=sigma_theta,
+            sigma_phi=sigma_phi,
+            maxiter=args.n_steps,
+            tol=args.lbfgs_tol,
+            reg_currents=1e-12,
+            callback=cb,
+            return_history=True,
+        )
+    else:
+        best, history = optimize_sources(
+            surface,
+            init=init,
+            eval_points=points,
+            B_target=B_target,
+            B_scale=args.B0,
+            sigma_theta=sigma_theta,
+            sigma_phi=sigma_phi,
+            n_steps=args.n_steps,
+            lr=args.lr,
+            reg_currents=1e-12,
+            callback=cb,
+            return_history=True,
+        )
+    t1 = time.perf_counter()
+
+    B_final = forward_B(
+        surface,
+        best,
+        eval_points=points,
+        sigma_theta=sigma_theta,
+        sigma_phi=sigma_phi,
+    )
+    rms = jnp.sqrt(jnp.mean(jnp.sum((B_final - B_target) ** 2, axis=-1)))
+    print(f"final_rms={float(rms):.6e} T  wall_time_s={t1 - t0:.2f}")
+    print(f"net_current={float(jnp.sum(enforce_net_zero(best.currents_raw))):+.3e} A")
+
     need_surface_fields = (not args.no_plots) or (not args.no_paraview)
     if need_surface_fields:
-        currents0, s0, V0, K0 = surface_solution(surface, init, sigma_theta=args.sigma_theta, sigma_phi=args.sigma_phi)
-        currents1, s1, V1, K1 = surface_solution(surface, best, sigma_theta=args.sigma_theta, sigma_phi=args.sigma_phi)
+        # Surface fields (init/final) for maps + ParaView.
+        currents0, s0, V0, K0 = surface_solution(surface, init, sigma_theta=sigma_theta, sigma_phi=sigma_phi)
+        currents1, s1, V1, K1 = surface_solution(surface, best, sigma_theta=sigma_theta, sigma_phi=sigma_phi)
 
         e_theta = surface.r_theta / surface.a
         e_phi_s = surface.r_phi / jnp.sqrt(surface.G)[..., None]
@@ -291,7 +227,7 @@ def main() -> None:
         from torus_solver.fieldline import trace_field_lines_batch
         from torus_solver.fields import tokamak_like_field
 
-        theta_seed = jnp.linspace(0.0, 2 * jnp.pi, int(args.n_fieldlines), endpoint=False)
+        theta_seed = jnp.linspace(0.0, 2 * jnp.pi, args.n_fieldlines, endpoint=False)
         rho = 0.5 * surface.a
         R_seed = surface.R0 + rho * jnp.cos(theta_seed)
         Z_seed = rho * jnp.sin(theta_seed)
@@ -321,6 +257,7 @@ def main() -> None:
         assert outdir is not None
         pv_dir = ensure_dir(outdir / "paraview")
 
+        # Surface datasets (init/final).
         surf_init = write_vtu(
             pv_dir / "winding_surface_init.vtu",
             torus_surface_to_vtu(
@@ -350,6 +287,7 @@ def main() -> None:
             ),
         )
 
+        # Electrode point clouds.
         def torus_xyz(theta, phi):
             R = args.R0 + args.a * np.cos(theta)
             return np.stack([R * np.cos(phi), R * np.sin(phi), args.a * np.sin(theta)], axis=-1)
@@ -379,10 +317,11 @@ def main() -> None:
             ),
         )
 
-        tgt_vtu = write_vtu(
-            pv_dir / "target_points.vtu",
-            point_cloud_to_vtu(
-                points=np.asarray(eval_points, dtype=float),
+        # Axis curve (polyline) with target/init/final B vectors.
+        axis_vtu = write_vtu(
+            pv_dir / "axis.vtu",
+            fieldlines_to_vtu(
+                traj=np.asarray(points, dtype=float)[None, :, :],
                 point_data={
                     "B_target": np.asarray(B_target, dtype=float),
                     "B_init": np.asarray(B_init, dtype=float),
@@ -390,36 +329,31 @@ def main() -> None:
                 },
             ),
         )
-        axis_vtu = write_vtu(
-            pv_dir / "axis.vtu",
-            fieldlines_to_vtu(traj=np.asarray(axis_xyz, dtype=float)[None, :, :]),
-        )
 
         blocks: dict[str, str] = {
             "winding_surface_init": surf_init.name,
             "winding_surface_final": surf_final.name,
             "electrodes_init": el_init.name,
             "electrodes_final": el_final.name,
-            "target_points": tgt_vtu.name,
             "axis": axis_vtu.name,
         }
         if traj_np is not None:
             # `trace_field_lines_batch` returns (n_steps+1, n_lines, 3), while ParaView
             # polylines are easiest to write as (n_lines, n_points, 3).
             traj_pv = np.transpose(traj_np, (1, 0, 2))
-            fl_vtu = write_vtu(pv_dir / "fieldlines_final.vtu", fieldlines_to_vtu(traj=traj_pv))
+            fl_vtu = write_vtu(
+                pv_dir / "fieldlines_final.vtu",
+                fieldlines_to_vtu(traj=traj_pv),
+            )
             blocks["fieldlines_final"] = fl_vtu.name
 
         scene = write_vtm(pv_dir / "scene.vtm", blocks)
         print(f"ParaView scene: {scene}")
 
-    if args.no_plots:
-        return
-
-    assert outdir is not None
-
     if not args.no_plots:
-        # Surface maps (final).
+        assert outdir is not None
+
+        # 2D surface maps (θ vertical, φ horizontal).
         phi_grid = np.asarray(surface.phi)
         theta_grid = np.asarray(surface.theta)
 
@@ -465,7 +399,7 @@ def main() -> None:
         plot_surface_map(
             phi=phi_grid,
             theta=theta_grid,
-            data=np.asarray(Kmag0),
+            data=np.asarray(np.sqrt(Ktheta0**2 + Kphi0**2)),
             title="|K| (initial)",
             cbar_label=r"$|K|$ [A/m]",
             path=outdir / "surface" / "Kmag_init.png",
@@ -473,52 +407,52 @@ def main() -> None:
         plot_surface_map(
             phi=phi_grid,
             theta=theta_grid,
-            data=np.asarray(Kmag1),
+            data=np.asarray(np.sqrt(Ktheta1**2 + Kphi1**2)),
             title="|K| (final)",
             cbar_label=r"$|K|$ [A/m]",
             path=outdir / "surface" / "Kmag_final.png",
         )
+        plot_surface_map(
+            phi=phi_grid,
+            theta=theta_grid,
+            data=np.asarray(Ktheta1),
+            title=r"$K_\theta$ (final)",
+            cbar_label=r"$K_\theta$ [A/m]",
+            path=outdir / "surface" / "Ktheta_final.png",
+            cmap="coolwarm",
+        )
+        plot_surface_map(
+            phi=phi_grid,
+            theta=theta_grid,
+            data=np.asarray(Kphi1),
+            title=r"$K_\phi$ (final)",
+            cbar_label=r"$K_\phi$ [A/m]",
+            path=outdir / "surface" / "Kphi_final.png",
+            cmap="coolwarm",
+        )
 
-        # Target geometry plots.
-        R_axis = np.sqrt(np.asarray(axis_xyz[:, 0]) ** 2 + np.asarray(axis_xyz[:, 1]) ** 2)
-        Z_axis = np.asarray(axis_xyz[:, 2])
-        fig, ax = tplot.plt.subplots(constrained_layout=True)
-        ax.plot(np.asarray(phi_axis), R_axis, label="R(φ)")
-        ax.plot(np.asarray(phi_axis), Z_axis, label="Z(φ)")
-        ax.set_xlabel(r"$\phi$ [rad]")
-        ax.set_ylabel("[m]")
-        ax.set_title("Prescribed bumpy axis in cylindrical coordinates")
-        ax.legend()
-        savefig(fig, outdir / "target" / "axis_RZ_vs_phi.png", dpi=args.dpi)
+        # Axis field comparison plots.
+        plot_axis_field_comparison(
+            phi=np.asarray(phi),
+            B_target=np.asarray(B_target),
+            B_init=np.asarray(B_init),
+            B_final=np.asarray(B_final),
+            basis=(np.asarray(e_r), np.asarray(e_phi), np.asarray(e_z)),
+            title="On-axis field: target vs init vs final",
+            path=outdir / "axis" / "B_components.png",
+        )
 
-        # Error before/after on ellipse points.
+        # Axis error vs phi.
         err0 = np.linalg.norm(np.asarray(B_init - B_target), axis=-1)
         err1 = np.linalg.norm(np.asarray(B_final - B_target), axis=-1)
         fig, ax = tplot.plt.subplots(constrained_layout=True)
-        ax.hist(err0, bins=30, alpha=0.55, label="init")
-        ax.hist(err1, bins=30, alpha=0.55, label="final")
-        ax.set_xlabel(r"$|B-B_{target}|$ [T]")
-        ax.set_ylabel("Count")
-        ax.set_title("Pointwise field error distribution on target ellipse")
-        ax.legend()
-        savefig(fig, outdir / "target" / "error_hist.png", dpi=args.dpi)
-
-        # Per-axis-section RMS (average over ellipse angle ψ).
-        n_axis = args.n_axis
-        n_psi = args.n_psi
-        err0_grid = err0.reshape((n_axis, n_psi))
-        err1_grid = err1.reshape((n_axis, n_psi))
-        rms0_phi = np.sqrt(np.mean(err0_grid**2, axis=1))
-        rms1_phi = np.sqrt(np.mean(err1_grid**2, axis=1))
-
-        fig, ax = tplot.plt.subplots(constrained_layout=True)
-        ax.plot(np.asarray(phi_axis), rms0_phi, label="init")
-        ax.plot(np.asarray(phi_axis), rms1_phi, label="final")
+        ax.plot(np.asarray(phi), err0, label="init")
+        ax.plot(np.asarray(phi), err1, label="final")
         ax.set_xlabel(r"$\phi$ [rad]")
-        ax.set_ylabel("RMS error on ellipse [T]")
-        ax.set_title("Field error vs axis toroidal angle (ellipse-averaged)")
+        ax.set_ylabel(r"$|B-B_{target}|$ [T]")
+        ax.set_title("On-axis field error vs toroidal angle")
         ax.legend()
-        savefig(fig, outdir / "target" / "error_vs_phi.png", dpi=args.dpi)
+        savefig(fig, outdir / "axis" / "error_vs_phi.png", dpi=args.dpi)
 
         # Optimization history.
         steps = list(range(len(history["loss"])))
@@ -539,32 +473,35 @@ def main() -> None:
             path=outdir / "optim" / "currents_rms.png",
         )
 
-        # 3D geometry: torus + axis + eval points + electrodes.
+        # Geometry 3D.
         def torus_xyz(theta, phi):
             R = args.R0 + args.a * np.cos(theta)
             return np.stack([R * np.cos(phi), R * np.sin(phi), args.a * np.sin(theta)], axis=-1)
 
         electrodes0 = torus_xyz(np.asarray(init.theta_src), np.asarray(init.phi_src))
         electrodes1 = torus_xyz(np.asarray(best.theta_src), np.asarray(best.phi_src))
+        axis_xyz = np.asarray(points)
+
         plot_3d_torus(
             torus_xyz=np.asarray(surface.r),
             electrodes_xyz=electrodes0,
-            curve_xyz=np.asarray(axis_xyz),
-            eval_xyz=np.asarray(eval_points),
+            curve_xyz=axis_xyz,
+            eval_xyz=axis_xyz,
             stride=args.plot_stride,
-            title="Torus + bumpy axis + evaluation points + initial electrodes",
-            path=outdir / "geometry" / "geometry_init.png",
+            title="Torus + initial electrodes + axis",
+            path=outdir / "geometry" / "torus_init.png",
         )
         plot_3d_torus(
             torus_xyz=np.asarray(surface.r),
             electrodes_xyz=electrodes1,
-            curve_xyz=np.asarray(axis_xyz),
-            eval_xyz=np.asarray(eval_points),
+            curve_xyz=axis_xyz,
+            eval_xyz=axis_xyz,
             stride=args.plot_stride,
-            title="Torus + bumpy axis + evaluation points + final electrodes",
-            path=outdir / "geometry" / "geometry_final.png",
+            title="Torus + final electrodes + axis",
+            path=outdir / "geometry" / "torus_final.png",
         )
 
+        # 3D field lines (final), using Biot–Savart from the optimized surface currents.
         if traj_np is not None:
             plot_fieldlines_3d(
                 torus_xyz=np.asarray(surface.r),
@@ -578,9 +515,11 @@ def main() -> None:
         # Currents bar plot.
         fig, ax = tplot.plt.subplots(constrained_layout=True)
         idx = np.arange(args.n_sources)
+        I0 = np.asarray(currents0)
+        I1 = np.asarray(currents1)
         w = 0.38
-        ax.bar(idx - w / 2, np.asarray(currents0), width=w, label="init")
-        ax.bar(idx + w / 2, np.asarray(currents1), width=w, label="final")
+        ax.bar(idx - w / 2, I0, width=w, label="init")
+        ax.bar(idx + w / 2, I1, width=w, label="final")
         ax.set_xlabel("Electrode index")
         ax.set_ylabel("Injected current [A]")
         ax.set_title("Electrode currents (projected to net zero)")

@@ -11,7 +11,7 @@ We trace field lines using the analytic ideal field (fast), then validate by
 sampling the Biot–Savart field from the surface current sheet along the traced line.
 
 Run:
-  - `python examples/1_simple/shell_toroidal_fieldlines.py`
+  - `python examples/fieldline_tracing/shell_toroidal_fieldlines.py`
 """
 
 from __future__ import annotations
