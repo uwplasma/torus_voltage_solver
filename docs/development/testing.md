@@ -33,6 +33,12 @@ The test suite includes, among others:
   - on-axis field of a circular loop (analytic)
   - uniform poloidal current sheet producing an approximately toroidal $1/R$ field
   - chunking invariance (chunked evaluation matches direct evaluation)
+- additional physics validations:
+  - Ampère-law $B_\phi(R)\approx \mu_0 I_\mathrm{pol}/(2\pi R)$ check for net poloidal current
+  - $B_\phi(R_0)\propto 1/R_0$ scaling check
+  - convergence of max|$B_n/|B|$| on an interior torus for an axisymmetric toroidal field
+- sensitivity/gradient checks:
+  - autodiff gradients vs central finite differences on tiny problems (uses an exact Poisson solve)
 - electrode model scaling consistency with the documented PDE:
   - for uniform $\sigma_s$, $\mathbf K$ is invariant and $\sigma_s V$ is invariant
 - field-line tracing consistency:
@@ -46,6 +52,8 @@ Browse:
 - `tests/test_metrics.py`
 - `tests/test_targets.py`
 - `tests/test_paraview.py`
+- `tests/test_validation_physics.py`
+- `tests/test_sensitivity_gradients.py`
 
 ## Build documentation locally (recommended)
 
@@ -69,4 +77,3 @@ python benchmarks/bench_fieldline.py
 ```
 
 They print compile time and steady-state runtime for representative kernels.
-

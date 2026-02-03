@@ -138,3 +138,40 @@ def vmec_target_surface(
     )
     return TargetSurface(theta=theta, phi=phi, xyz=xyz, normals=normals, weights=weights, fit=fit)
 
+
+def circular_torus_target_surface(
+    *,
+    R0: float,
+    a: float,
+    n_theta: int,
+    n_phi: int,
+    dtype=jnp.float64,
+) -> TargetSurface:
+    """Return a circular torus target surface (xyz, normals, weights) on a (theta,phi) grid.
+
+    This helper is useful both for:
+
+    - benchmarking/validation: axisymmetry implies B·n=0 on any interior torus for a purely toroidal field
+    - GUI/optimization: choosing a simple reference surface inside the winding surface
+    """
+    theta = jnp.linspace(0.0, 2 * jnp.pi, int(n_theta), endpoint=False, dtype=dtype)
+    phi = jnp.linspace(0.0, 2 * jnp.pi, int(n_phi), endpoint=False, dtype=dtype)
+
+    th = theta[:, None]
+    ones_phi = jnp.ones((1, int(n_phi)), dtype=dtype)
+
+    R_line = float(R0) + float(a) * jnp.cos(th)  # (Nθ,1)
+    Z_line = float(a) * jnp.sin(th)  # (Nθ,1)
+    R = R_line * ones_phi  # (Nθ,Nφ)
+    Z = Z_line * ones_phi  # (Nθ,Nφ)
+
+    R_theta = (-float(a) * jnp.sin(th)) * ones_phi
+    Z_theta = (float(a) * jnp.cos(th)) * ones_phi
+    R_phi = jnp.zeros((int(n_theta), int(n_phi)), dtype=dtype)
+    Z_phi = jnp.zeros((int(n_theta), int(n_phi)), dtype=dtype)
+
+    xyz, normals, weights = RZ_and_derivatives_to_xyz_normals_weights(
+        R=R, Z=Z, R_theta=R_theta, R_phi=R_phi, Z_theta=Z_theta, Z_phi=Z_phi, phi=phi
+    )
+    fit = FitResult(shift_R=0.0, scale_rho=1.0, rho_max_before_m=float(a))
+    return TargetSurface(theta=theta, phi=phi, xyz=xyz, normals=normals, weights=weights, fit=fit)

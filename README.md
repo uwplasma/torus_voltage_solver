@@ -248,6 +248,13 @@ Highlights (see `tests/test_torus_solver.py`):
 - A “shell toroidal field” check:
   a uniform poloidal surface current sheet produces a toroidal `~1/R` field
   within a few percent on a modest-resolution grid
+- Additional physics validations (see `tests/test_validation_physics.py`):
+  - Ampère-law check for net poloidal current: `Bφ(R) ≈ μ0 Ipol/(2πR)`
+  - scaling check: for fixed `Ipol`, `Bφ(R0) ∝ 1/R0`
+  - resolution convergence: `max|Bn/B|` decreases as winding-surface resolution increases
+- Sensitivity / differentiability checks (see `tests/test_sensitivity_gradients.py`):
+  - autodiff gradients match central finite differences on tiny problems
+  - Poisson solve validated against an explicit matrix solve at small resolution
 
 ## Examples
 

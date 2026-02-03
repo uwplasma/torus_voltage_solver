@@ -74,6 +74,36 @@ Outputs include:
 - Biot–Savart vs analytic comparisons along a traced line
 - `figures/shell_toroidal_fieldlines/paraview/scene.vtm`
 
+## Convergence sweep: max|Bn/B| for an axisymmetric toroidal field
+
+Script:
+
+- `examples/1_simple/convergence_bn_over_B_toroidal_current.py`
+
+This is a “trust story” example: we prescribe a **net poloidal current** on the winding surface
+using the current-potential model (a REGCOIL-style secular term), which generates an approximately
+toroidal field inside the torus. For a purely toroidal field, the normalized normal component
+should vanish on any interior torus:
+
+$$
+\frac{B_n}{|B|} = \frac{\mathbf B \cdot \hat{\mathbf n}}{|\mathbf B|} \approx 0.
+$$
+
+The script sweeps the winding-surface resolution and monitors:
+
+- `max|Bn/B|` and `RMS(Bn/B)` on an interior target torus
+- max relative error of $B_\phi(R)$ against Ampère’s-law scaling $B_\phi \approx \mu_0 I_\mathrm{pol}/(2\pi R)$
+
+```bash
+python examples/1_simple/convergence_bn_over_B_toroidal_current.py
+```
+
+Outputs include:
+
+- `figures/convergence_bn_over_B_toroidal_current/convergence/convergence_summary.png`
+- `figures/convergence_bn_over_B_toroidal_current/maps/Bn_over_B_map.png`
+- `figures/convergence_bn_over_B_toroidal_current/paraview/scene.vtm`
+
 ## Inboard cut voltage → poloidal current → toroidal field
 
 Script:
