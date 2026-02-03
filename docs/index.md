@@ -46,6 +46,7 @@ glossary
 :caption: Theory
 
 theory/geometry
+theory/numerics-and-units
 theory/surface-operators
 theory/electrode-model
 theory/current-potential
